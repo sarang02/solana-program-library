@@ -1,17 +1,16 @@
 //! Instruction types
 
 use {
-    solana_program::{
-        instruction::{AccountMeta, Instruction},
-        program_error::ProgramError,
-        pubkey::Pubkey,
-        system_program,
-    },
+    solana_instruction::{AccountMeta, Instruction},
+    solana_program_error::ProgramError,
+    solana_pubkey::Pubkey,
     spl_discriminator::{ArrayDiscriminator, SplDiscriminate},
     spl_pod::{bytemuck::pod_slice_to_bytes, slice::PodSlice},
     spl_tlv_account_resolution::account::ExtraAccountMeta,
     std::convert::TryInto,
 };
+
+const SYSTEM_PROGRAM_ID: Pubkey = Pubkey::from_str_const("11111111111111111111111111111111");
 
 /// Instructions supported by the transfer hook interface.
 #[repr(C)]
@@ -25,9 +24,9 @@ pub enum TransferHookInstruction {
     ///   1. `[]` Token mint
     ///   2. `[]` Destination account
     ///   3. `[]` Source account's owner/delegate
-    ///   4. `[]` Validation account
-    ///   5..5+M `[]` `M` additional accounts, written in validation account
-    ///     data
+    ///   4. `[]` (Optional) Validation account
+    ///   5. ..`5+M` `[]` `M` optional additional accounts, written in
+    ///      validation account data
     Execute {
         /// Amount of tokens to transfer
         amount: u64,
@@ -81,7 +80,7 @@ pub struct UpdateExtraAccountMetaListInstruction;
 
 impl TransferHookInstruction {
     /// Unpacks a byte buffer into a
-    /// [TransferHookInstruction](enum.TransferHookInstruction.html).
+    /// [`TransferHookInstruction`](enum.TransferHookInstruction.html).
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
         if input.len() < ArrayDiscriminator::LENGTH {
             return Err(ProgramError::InvalidInstructionData);
@@ -114,8 +113,8 @@ impl TransferHookInstruction {
         })
     }
 
-    /// Packs a [TokenInstruction](enum.TokenInstruction.html) into a byte
-    /// buffer.
+    /// Packs a [`TransferHookInstruction`](enum.TransferHookInstruction.html)
+    /// into a byte buffer.
     pub fn pack(&self) -> Vec<u8> {
         let mut buf = vec![];
         match self {
@@ -165,9 +164,11 @@ pub fn execute_with_extra_account_metas(
         mint_pubkey,
         destination_pubkey,
         authority_pubkey,
-        validate_state_pubkey,
         amount,
     );
+    instruction
+        .accounts
+        .push(AccountMeta::new_readonly(*validate_state_pubkey, false));
     instruction.accounts.extend_from_slice(additional_accounts);
     instruction
 }
@@ -180,7 +181,6 @@ pub fn execute(
     mint_pubkey: &Pubkey,
     destination_pubkey: &Pubkey,
     authority_pubkey: &Pubkey,
-    validate_state_pubkey: &Pubkey,
     amount: u64,
 ) -> Instruction {
     let data = TransferHookInstruction::Execute { amount }.pack();
@@ -189,7 +189,6 @@ pub fn execute(
         AccountMeta::new_readonly(*mint_pubkey, false),
         AccountMeta::new_readonly(*destination_pubkey, false),
         AccountMeta::new_readonly(*authority_pubkey, false),
-        AccountMeta::new_readonly(*validate_state_pubkey, false),
     ];
     Instruction {
         program_id: *program_id,
@@ -215,7 +214,7 @@ pub fn initialize_extra_account_meta_list(
         AccountMeta::new(*extra_account_metas_pubkey, false),
         AccountMeta::new_readonly(*mint_pubkey, false),
         AccountMeta::new_readonly(*authority_pubkey, true),
-        AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
     ];
 
     Instruction {
@@ -254,6 +253,11 @@ pub fn update_extra_account_meta_list(
 #[cfg(test)]
 mod test {
     use {super::*, crate::NAMESPACE, solana_program::hash, spl_pod::bytemuck::pod_from_bytes};
+
+    #[test]
+    fn system_program_id() {
+        assert_eq!(solana_program::system_program::id(), SYSTEM_PROGRAM_ID);
+    }
 
     #[test]
     fn validate_packing() {

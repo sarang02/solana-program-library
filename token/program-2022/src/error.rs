@@ -1,5 +1,7 @@
 //! Error types
 
+#[cfg(not(target_os = "solana"))]
+use spl_token_confidential_transfer_proof_generation::errors::TokenProofGenerationError;
 use {
     num_derive::FromPrimitive,
     solana_program::{
@@ -7,6 +9,7 @@ use {
         msg,
         program_error::{PrintProgramError, ProgramError},
     },
+    spl_token_confidential_transfer_proof_extraction::errors::TokenProofExtractionError,
     thiserror::Error,
 };
 
@@ -243,6 +246,29 @@ pub enum TokenError {
     /// Ciphertext arithmetic failed
     #[error("Ciphertext arithmetic failed")]
     CiphertextArithmeticFailed,
+    /// Pedersen commitments did not match
+    #[error("Pedersen commitment mismatch")]
+    PedersenCommitmentMismatch,
+    /// Range proof length did not match
+    #[error("Range proof length mismatch")]
+    RangeProofLengthMismatch,
+    /// Illegal transfer amount bit length
+    #[error("Illegal transfer amount bit length")]
+    IllegalBitLength,
+    /// Fee calculation failed
+    #[error("Fee calculation failed")]
+    FeeCalculation,
+
+    //65
+    /// Withdraw / Deposit not allowed for confidential-mint-burn
+    #[error("Withdraw / Deposit not allowed for confidential-mint-burn")]
+    IllegalMintBurnConversion,
+    /// Invalid scale for scaled ui amount
+    #[error("Invalid scale for scaled ui amount")]
+    InvalidScale,
+    /// Transferring, minting, and burning is paused on this mint
+    #[error("Transferring, minting, and burning is paused on this mint")]
+    MintPaused,
 }
 impl From<TokenError> for ProgramError {
     fn from(e: TokenError) -> Self {
@@ -418,6 +444,59 @@ impl PrintProgramError for TokenError {
             TokenError::CiphertextArithmeticFailed => {
                 msg!("Ciphertext arithmetic failed")
             }
+            TokenError::PedersenCommitmentMismatch => {
+                msg!("Pedersen commitments did not match")
+            }
+            TokenError::RangeProofLengthMismatch => {
+                msg!("Range proof lengths did not match")
+            }
+            TokenError::IllegalBitLength => {
+                msg!("Illegal transfer amount bit length")
+            }
+            TokenError::FeeCalculation => {
+                msg!("Transfer fee calculation failed")
+            }
+            TokenError::IllegalMintBurnConversion => {
+                msg!("Conversions from normal to confidential token balance and vice versa are illegal if the confidential-mint-burn extension is enabled")
+            }
+            TokenError::InvalidScale => {
+                msg!("Invalid scale for scaled ui amount")
+            }
+            TokenError::MintPaused => {
+                msg!("Transferring, minting, and burning is paused on this mint")
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "solana"))]
+impl From<TokenProofGenerationError> for TokenError {
+    fn from(e: TokenProofGenerationError) -> Self {
+        match e {
+            TokenProofGenerationError::ProofGeneration(_) => TokenError::ProofGeneration,
+            TokenProofGenerationError::NotEnoughFunds => TokenError::InsufficientFunds,
+            TokenProofGenerationError::IllegalAmountBitLength => TokenError::IllegalBitLength,
+            TokenProofGenerationError::FeeCalculation => TokenError::FeeCalculation,
+            TokenProofGenerationError::CiphertextExtraction => TokenError::MalformedCiphertext,
+        }
+    }
+}
+
+impl From<TokenProofExtractionError> for TokenError {
+    fn from(e: TokenProofExtractionError) -> Self {
+        match e {
+            TokenProofExtractionError::ElGamalPubkeyMismatch => {
+                TokenError::ConfidentialTransferElGamalPubkeyMismatch
+            }
+            TokenProofExtractionError::PedersenCommitmentMismatch => {
+                TokenError::PedersenCommitmentMismatch
+            }
+            TokenProofExtractionError::RangeProofLengthMismatch => {
+                TokenError::RangeProofLengthMismatch
+            }
+            TokenProofExtractionError::FeeParametersMismatch => TokenError::FeeParametersMismatch,
+            TokenProofExtractionError::CurveArithmetic => TokenError::CiphertextArithmeticFailed,
+            TokenProofExtractionError::CiphertextExtraction => TokenError::MalformedCiphertext,
         }
     }
 }

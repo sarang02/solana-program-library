@@ -270,7 +270,28 @@ async fn test_cpi_guard_transfer() {
         let alice_state = token_obj.get_account_info(&alice.pubkey()).await.unwrap();
         assert_eq!(alice_state.base.amount, amount);
 
-        // user-auth cpi transfer with cpi guard doesnt work
+        // user-auth cpi transfer with cpi guard doesn't work
+        let error = token_obj
+            .process_ixs(&[mk_transfer(alice.pubkey(), do_checked)], &[&alice])
+            .await
+            .unwrap_err();
+        assert_eq!(error, client_error(TokenError::CpiGuardTransferBlocked));
+
+        let alice_state = token_obj.get_account_info(&alice.pubkey()).await.unwrap();
+        assert_eq!(alice_state.base.amount, amount);
+
+        // delegate-auth cpi transfer to self does not work
+        token_obj
+            .approve(
+                &alice.pubkey(),
+                &alice.pubkey(),
+                &alice.pubkey(),
+                1,
+                &[&alice],
+            )
+            .await
+            .unwrap();
+
         let error = token_obj
             .process_ixs(&[mk_transfer(alice.pubkey(), do_checked)], &[&alice])
             .await
@@ -389,7 +410,28 @@ async fn test_cpi_guard_burn() {
         let alice_state = token_obj.get_account_info(&alice.pubkey()).await.unwrap();
         assert_eq!(alice_state.base.amount, amount);
 
-        // user-auth cpi burn with cpi guard doesnt work
+        // user-auth cpi burn with cpi guard doesn't work
+        let error = token_obj
+            .process_ixs(&[mk_burn(alice.pubkey(), do_checked)], &[&alice])
+            .await
+            .unwrap_err();
+        assert_eq!(error, client_error(TokenError::CpiGuardBurnBlocked));
+
+        let alice_state = token_obj.get_account_info(&alice.pubkey()).await.unwrap();
+        assert_eq!(alice_state.base.amount, amount);
+
+        // delegate-auth cpi burn by self does not work
+        token_obj
+            .approve(
+                &alice.pubkey(),
+                &alice.pubkey(),
+                &alice.pubkey(),
+                1,
+                &[&alice],
+            )
+            .await
+            .unwrap();
+
         let error = token_obj
             .process_ixs(&[mk_burn(alice.pubkey(), do_checked)], &[&alice])
             .await
@@ -504,7 +546,7 @@ async fn test_cpi_guard_approve() {
             .await
             .unwrap();
 
-        // approve doesnt work through cpi
+        // approve doesn't work through cpi
         let error = token_obj
             .process_ixs(&[mk_approve(do_checked)], &[&alice])
             .await
@@ -737,7 +779,7 @@ async fn test_cpi_guard_set_authority() {
         )
         .unwrap();
 
-        // this wraps it or doesnt based on the test case
+        // this wraps it or doesn't based on the test case
         let instruction = if do_in_cpi {
             wrap_instruction(spl_instruction_padding::id(), token_instruction, vec![], 0).unwrap()
         } else {

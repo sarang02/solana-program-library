@@ -2,12 +2,14 @@
 
 set -e
 cd "$(dirname "$0")/.."
+export SOLANA_VERSION="v2.0.14"
 source ./ci/solana-version.sh install
 
 set -x
-cd account-compression/sdk
 pnpm install
+pnpm format
+cd account-compression/sdk
 pnpm build
 pnpm build:program
-# pnpm lint # re-enable when lints are fixed
+pnpm lint
 pnpm test

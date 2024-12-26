@@ -2,16 +2,14 @@
 
 use {
     bytemuck::{Pod, Zeroable},
-    solana_program::{
-        instruction::{AccountMeta, Instruction},
-        program_error::ProgramError,
-        pubkey::Pubkey,
-    },
+    solana_instruction::{AccountMeta, Instruction},
+    solana_program_error::ProgramError,
+    solana_pubkey::Pubkey,
     spl_discriminator::{ArrayDiscriminator, SplDiscriminate},
     spl_pod::{
         bytemuck::{pod_bytes_of, pod_from_bytes},
         optional_keys::OptionalNonZeroPubkey,
-        primitives::PodU32,
+        primitives::PodU64,
     },
 };
 
@@ -23,7 +21,7 @@ pub struct InitializeGroup {
     /// Update authority for the group
     pub update_authority: OptionalNonZeroPubkey,
     /// The maximum number of group members
-    pub max_size: PodU32,
+    pub max_size: PodU64,
 }
 
 /// Instruction data for updating the max size of a `Group`
@@ -32,7 +30,7 @@ pub struct InitializeGroup {
 #[discriminator_hash_input("spl_token_group_interface:update_group_max_size")]
 pub struct UpdateGroupMaxSize {
     /// New max size for the group
-    pub max_size: PodU32,
+    pub max_size: PodU64,
 }
 
 /// Instruction data for updating the authority of a `Group`
@@ -155,7 +153,7 @@ pub fn initialize_group(
     mint: &Pubkey,
     mint_authority: &Pubkey,
     update_authority: Option<Pubkey>,
-    max_size: u32,
+    max_size: u64,
 ) -> Instruction {
     let update_authority = OptionalNonZeroPubkey::try_from(update_authority)
         .expect("Failed to deserialize `Option<Pubkey>`");
@@ -180,7 +178,7 @@ pub fn update_group_max_size(
     program_id: &Pubkey,
     group: &Pubkey,
     update_authority: &Pubkey,
-    max_size: u32,
+    max_size: u64,
 ) -> Instruction {
     let data = TokenGroupInstruction::UpdateGroupMaxSize(UpdateGroupMaxSize {
         max_size: max_size.into(),
@@ -243,12 +241,7 @@ pub fn initialize_member(
 
 #[cfg(test)]
 mod test {
-    use {super::*, crate::NAMESPACE, solana_program::hash};
-
-    #[repr(C)]
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable, SplDiscriminate)]
-    #[discriminator_hash_input("mock_group")]
-    struct MockGroup;
+    use {super::*, crate::NAMESPACE, solana_sha256_hasher::hashv};
 
     fn instruction_pack_unpack<I>(instruction: TokenGroupInstruction, discriminator: &[u8], data: I)
     where
@@ -270,7 +263,7 @@ mod test {
             max_size: 100.into(),
         };
         let instruction = TokenGroupInstruction::InitializeGroup(data);
-        let preimage = hash::hashv(&[format!("{NAMESPACE}:initialize_token_group").as_bytes()]);
+        let preimage = hashv(&[format!("{NAMESPACE}:initialize_token_group").as_bytes()]);
         let discriminator = &preimage.as_ref()[..ArrayDiscriminator::LENGTH];
         instruction_pack_unpack::<InitializeGroup>(instruction, discriminator, data);
     }
@@ -281,7 +274,7 @@ mod test {
             max_size: 200.into(),
         };
         let instruction = TokenGroupInstruction::UpdateGroupMaxSize(data);
-        let preimage = hash::hashv(&[format!("{NAMESPACE}:update_group_max_size").as_bytes()]);
+        let preimage = hashv(&[format!("{NAMESPACE}:update_group_max_size").as_bytes()]);
         let discriminator = &preimage.as_ref()[..ArrayDiscriminator::LENGTH];
         instruction_pack_unpack::<UpdateGroupMaxSize>(instruction, discriminator, data);
     }
@@ -292,7 +285,7 @@ mod test {
             new_authority: OptionalNonZeroPubkey::default(),
         };
         let instruction = TokenGroupInstruction::UpdateGroupAuthority(data);
-        let preimage = hash::hashv(&[format!("{NAMESPACE}:update_authority").as_bytes()]);
+        let preimage = hashv(&[format!("{NAMESPACE}:update_authority").as_bytes()]);
         let discriminator = &preimage.as_ref()[..ArrayDiscriminator::LENGTH];
         instruction_pack_unpack::<UpdateGroupAuthority>(instruction, discriminator, data);
     }
@@ -301,7 +294,7 @@ mod test {
     fn initialize_member_pack() {
         let data = InitializeMember {};
         let instruction = TokenGroupInstruction::InitializeMember(data);
-        let preimage = hash::hashv(&[format!("{NAMESPACE}:initialize_member").as_bytes()]);
+        let preimage = hashv(&[format!("{NAMESPACE}:initialize_member").as_bytes()]);
         let discriminator = &preimage.as_ref()[..ArrayDiscriminator::LENGTH];
         instruction_pack_unpack::<InitializeMember>(instruction, discriminator, data);
     }

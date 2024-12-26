@@ -64,7 +64,7 @@ async fn test_initialize_group_member() {
     )
     .await;
 
-    let mut context = context.lock().await;
+    let context = context.lock().await;
 
     let rent = context.banks_client.get_rent().await.unwrap();
     let space = TlvStateBorrowed::get_base_len() + std::mem::size_of::<TokenGroup>();
@@ -84,7 +84,7 @@ async fn test_initialize_group_member() {
                 &group.pubkey(),
                 &group_mint.pubkey(),
                 &group_mint_authority.pubkey(),
-                group_state.update_authority.try_into().unwrap(),
+                group_state.update_authority.into(),
                 group_state.max_size.into(),
             ),
         ],
@@ -256,5 +256,5 @@ async fn test_initialize_group_member() {
     let fetched_meta = TlvStateBorrowed::unpack(&member_account.data).unwrap();
     let fetched_group_member_state = fetched_meta.get_first_value::<TokenGroupMember>().unwrap();
     assert_eq!(fetched_group_member_state.group, group.pubkey());
-    assert_eq!(u32::from(fetched_group_member_state.member_number), 1);
+    assert_eq!(u64::from(fetched_group_member_state.member_number), 1);
 }

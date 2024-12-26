@@ -14,7 +14,7 @@ use {
         transaction::Transaction,
     },
     solana_test_validator::{TestValidator, TestValidatorGenesis, UpgradeableProgramInfo},
-    spl_associated_token_account::get_associated_token_address_with_program_id,
+    spl_associated_token_account_client::address::get_associated_token_address_with_program_id,
     spl_token_2022::{
         extension::{
             confidential_transfer::{ConfidentialTransferAccount, ConfidentialTransferMint},
@@ -32,7 +32,7 @@ use {
             BaseStateWithExtensions, StateWithExtensionsOwned,
         },
         instruction::create_native_mint,
-        solana_zk_token_sdk::zk_token_elgamal::pod::ElGamalPubkey,
+        solana_zk_sdk::encryption::pod::elgamal::PodElGamalPubkey,
         state::{Account, AccountState, Mint, Multisig},
     },
     spl_token_cli::{
@@ -44,11 +44,16 @@ use {
         client::{
             ProgramClient, ProgramOfflineClient, ProgramRpcClient, ProgramRpcClientSendTransaction,
         },
-        token::Token,
+        token::{ComputeUnitLimit, Token},
     },
     spl_token_group_interface::state::{TokenGroup, TokenGroupMember},
     spl_token_metadata_interface::state::TokenMetadata,
-    std::{ffi::OsString, path::PathBuf, str::FromStr, sync::Arc},
+    std::{
+        ffi::{OsStr, OsString},
+        path::PathBuf,
+        str::FromStr,
+        sync::Arc,
+    },
     tempfile::NamedTempFile,
 };
 
@@ -87,6 +92,7 @@ async fn main() {
     // maybe come up with a way to do this through a some macro tag on the function?
     let tests = vec![
         async_trial!(create_token_default, test_validator, payer),
+        async_trial!(create_token_2022, test_validator, payer),
         async_trial!(create_token_interest_bearing, test_validator, payer),
         async_trial!(set_interest_rate, test_validator, payer),
         async_trial!(supply, test_validator, payer),
@@ -118,6 +124,7 @@ async fn main() {
         async_trial!(non_transferable, test_validator, payer),
         async_trial!(default_account_state, test_validator, payer),
         async_trial!(transfer_fee, test_validator, payer),
+        async_trial!(transfer_fee_basis_point, test_validator, payer),
         async_trial!(confidential_transfer, test_validator, payer),
         async_trial!(multisig_transfer, test_validator, payer),
         async_trial!(offline_multisig_transfer_with_nonce, test_validator, payer),
@@ -132,9 +139,11 @@ async fn main() {
         async_trial!(group_pointer, test_validator, payer),
         async_trial!(group_member_pointer, test_validator, payer),
         async_trial!(transfer_hook, test_validator, payer),
+        async_trial!(transfer_hook_with_transfer_fee, test_validator, payer),
         async_trial!(metadata, test_validator, payer),
         async_trial!(group, test_validator, payer),
         async_trial!(confidential_transfer_with_fee, test_validator, payer),
+        async_trial!(compute_budget, test_validator, payer),
         // GC messes with every other test, so have it on its own test validator
         async_trial!(gc, gc_test_validator, gc_payer),
     ];
@@ -159,7 +168,7 @@ async fn new_validator_for_test() -> (TestValidator, Keypair) {
             upgrade_authority: Pubkey::new_unique(),
         },
         UpgradeableProgramInfo {
-            program_id: spl_associated_token_account::id(),
+            program_id: spl_associated_token_account_client::program::id(),
             loader: bpf_loader_upgradeable::id(),
             program_path: PathBuf::from("../../target/deploy/spl_associated_token_account.so"),
             upgrade_authority: Pubkey::new_unique(),
@@ -199,6 +208,8 @@ fn test_config_with_default_signer<'a>(
         multisigner_pubkeys: vec![],
         program_id: *program_id,
         restrict_to_program_id: true,
+        compute_unit_price: None,
+        compute_unit_limit: ComputeUnitLimit::Simulated,
     }
 }
 
@@ -226,6 +237,8 @@ fn test_config_without_default_signer<'a>(
         multisigner_pubkeys: vec![],
         program_id: *program_id,
         restrict_to_program_id: true,
+        compute_unit_price: None,
+        compute_unit_limit: ComputeUnitLimit::Simulated,
     }
 }
 
@@ -380,6 +393,38 @@ async fn mint_tokens(
     .await
 }
 
+async fn run_transfer_test(config: &Config<'_>, payer: &Keypair) {
+    let token = create_token(config, payer).await;
+    let source = create_associated_account(config, payer, &token, &payer.pubkey()).await;
+    let destination = create_auxiliary_account(config, payer, token).await;
+    let ui_amount = 100.0;
+    mint_tokens(config, payer, token, ui_amount, source)
+        .await
+        .unwrap();
+    let result = process_test_command(
+        config,
+        payer,
+        &[
+            "spl-token",
+            CommandName::Transfer.into(),
+            &token.to_string(),
+            "10",
+            &destination.to_string(),
+        ],
+    )
+    .await;
+    result.unwrap();
+
+    let account = config.rpc_client.get_account(&source).await.unwrap();
+    let token_account = StateWithExtensionsOwned::<Account>::unpack(account.data).unwrap();
+    let amount = spl_token::ui_amount_to_amount(90.0, TEST_DECIMALS);
+    assert_eq!(token_account.base.amount, amount);
+    let account = config.rpc_client.get_account(&destination).await.unwrap();
+    let token_account = StateWithExtensionsOwned::<Account>::unpack(account.data).unwrap();
+    let amount = spl_token::ui_amount_to_amount(10.0, TEST_DECIMALS);
+    assert_eq!(token_account.base.amount, amount);
+}
+
 async fn process_test_command<I, T>(config: &Config<'_>, payer: &Keypair, args: I) -> CommandResult
 where
     I: IntoIterator<Item = T>,
@@ -395,16 +440,15 @@ where
         &multisig_member_help,
     )
     .get_matches_from(args);
-    let (sub_command, sub_matches) = app_matches.subcommand();
+    let (sub_command, matches) = app_matches.subcommand().unwrap();
     let sub_command = CommandName::from_str(sub_command).unwrap();
-    let matches = sub_matches.unwrap();
 
     let wallet_manager = None;
     let bulk_signers: Vec<Arc<dyn Signer>> = vec![Arc::new(clone_keypair(payer))];
     process_command(&sub_command, matches, config, wallet_manager, bulk_signers).await
 }
 
-async fn exec_test_cmd(config: &Config<'_>, args: &[&str]) -> CommandResult {
+async fn exec_test_cmd<T: AsRef<OsStr>>(config: &Config<'_>, args: &[T]) -> CommandResult {
     let default_decimals = format!("{}", spl_token_2022::native_mint::DECIMALS);
     let minimum_signers_help = minimum_signers_help_string();
     let multisig_member_help = multisig_member_help_string();
@@ -415,9 +459,8 @@ async fn exec_test_cmd(config: &Config<'_>, args: &[&str]) -> CommandResult {
         &multisig_member_help,
     )
     .get_matches_from(args);
-    let (sub_command, sub_matches) = app_matches.subcommand();
+    let (sub_command, matches) = app_matches.subcommand().unwrap();
     let sub_command = CommandName::from_str(sub_command).unwrap();
-    let matches = sub_matches.unwrap();
 
     let mut wallet_manager = None;
     let mut bulk_signers: Vec<Arc<dyn Signer>> = Vec::new();
@@ -451,6 +494,44 @@ async fn create_token_default(test_validator: &TestValidator, payer: &Keypair) {
         let account = config.rpc_client.get_account(&mint).await.unwrap();
         assert_eq!(account.owner, *program_id);
     }
+}
+
+async fn create_token_2022(test_validator: &TestValidator, payer: &Keypair) {
+    let config = test_config_with_default_signer(test_validator, payer, &spl_token_2022::id());
+    let mut wallet_manager = None;
+    let mut bulk_signers: Vec<Arc<dyn Signer>> = Vec::new();
+    let mut multisigner_ids = Vec::new();
+
+    let args = &[
+        "spl-token",
+        CommandName::CreateToken.into(),
+        "--program-2022",
+    ];
+
+    let default_decimals = format!("{}", spl_token_2022::native_mint::DECIMALS);
+    let minimum_signers_help = minimum_signers_help_string();
+    let multisig_member_help = multisig_member_help_string();
+
+    let app_matches = app(
+        &default_decimals,
+        &minimum_signers_help,
+        &multisig_member_help,
+    )
+    .get_matches_from(args);
+    let (_, matches) = app_matches.subcommand().unwrap();
+
+    let config = Config::new_with_clients_and_ws_url(
+        matches,
+        &mut wallet_manager,
+        &mut bulk_signers,
+        &mut multisigner_ids,
+        config.rpc_client.clone(),
+        config.program_client.clone(),
+        config.websocket_url.clone(),
+    )
+    .await;
+
+    assert_eq!(config.program_id, spl_token_2022::ID);
 }
 
 async fn create_token_interest_bearing(test_validator: &TestValidator, payer: &Keypair) {
@@ -855,35 +936,7 @@ async fn wrapped_sol(test_validator: &TestValidator, payer: &Keypair) {
 async fn transfer(test_validator: &TestValidator, payer: &Keypair) {
     for program_id in VALID_TOKEN_PROGRAM_IDS.iter() {
         let config = test_config_with_default_signer(test_validator, payer, program_id);
-        let token = create_token(&config, payer).await;
-        let source = create_associated_account(&config, payer, &token, &payer.pubkey()).await;
-        let destination = create_auxiliary_account(&config, payer, token).await;
-        let ui_amount = 100.0;
-        mint_tokens(&config, payer, token, ui_amount, source)
-            .await
-            .unwrap();
-        let result = process_test_command(
-            &config,
-            payer,
-            &[
-                "spl-token",
-                CommandName::Transfer.into(),
-                &token.to_string(),
-                "10",
-                &destination.to_string(),
-            ],
-        )
-        .await;
-        result.unwrap();
-
-        let account = config.rpc_client.get_account(&source).await.unwrap();
-        let token_account = StateWithExtensionsOwned::<Account>::unpack(account.data).unwrap();
-        let amount = spl_token::ui_amount_to_amount(90.0, TEST_DECIMALS);
-        assert_eq!(token_account.base.amount, amount);
-        let account = config.rpc_client.get_account(&destination).await.unwrap();
-        let token_account = StateWithExtensionsOwned::<Account>::unpack(account.data).unwrap();
-        let amount = spl_token::ui_amount_to_amount(10.0, TEST_DECIMALS);
-        assert_eq!(token_account.base.amount, amount);
+        run_transfer_test(&config, payer).await;
     }
 }
 
@@ -2478,7 +2531,7 @@ async fn transfer_fee(test_validator: &TestValidator, payer: &Keypair) {
     let extension = mint_state.get_extension::<TransferFeeConfig>().unwrap();
 
     assert_eq!(
-        Option::<Pubkey>::try_from(extension.transfer_fee_config_authority).unwrap(),
+        Option::<Pubkey>::from(extension.transfer_fee_config_authority),
         None,
     );
 
@@ -2502,13 +2555,61 @@ async fn transfer_fee(test_validator: &TestValidator, payer: &Keypair) {
     let extension = mint_state.get_extension::<TransferFeeConfig>().unwrap();
 
     assert_eq!(
-        Option::<Pubkey>::try_from(extension.withdraw_withheld_authority).unwrap(),
+        Option::<Pubkey>::from(extension.withdraw_withheld_authority),
         None,
     );
 }
 
+async fn transfer_fee_basis_point(test_validator: &TestValidator, payer: &Keypair) {
+    let config = test_config_with_default_signer(test_validator, payer, &spl_token_2022::id());
+
+    let transfer_fee_basis_points = 100;
+    let maximum_fee = 1.2;
+    let decimal = 9;
+
+    let token = Keypair::new();
+    let token_keypair_file = NamedTempFile::new().unwrap();
+    write_keypair_file(&token, &token_keypair_file).unwrap();
+    let token_pubkey = token.pubkey();
+    process_test_command(
+        &config,
+        payer,
+        &[
+            "spl-token",
+            CommandName::CreateToken.into(),
+            token_keypair_file.path().to_str().unwrap(),
+            "--transfer-fee-basis-points",
+            &transfer_fee_basis_points.to_string(),
+            "--transfer-fee-maximum-fee",
+            &maximum_fee.to_string(),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let account = config.rpc_client.get_account(&token_pubkey).await.unwrap();
+    let test_mint = StateWithExtensionsOwned::<Mint>::unpack(account.data).unwrap();
+    let extension = test_mint.get_extension::<TransferFeeConfig>().unwrap();
+    assert_eq!(
+        u16::from(extension.older_transfer_fee.transfer_fee_basis_points),
+        transfer_fee_basis_points
+    );
+    assert_eq!(
+        u64::from(extension.older_transfer_fee.maximum_fee),
+        (maximum_fee * i32::pow(10, decimal) as f64) as u64
+    );
+    assert_eq!(
+        u16::from(extension.newer_transfer_fee.transfer_fee_basis_points),
+        transfer_fee_basis_points
+    );
+    assert_eq!(
+        u64::from(extension.newer_transfer_fee.maximum_fee),
+        (maximum_fee * i32::pow(10, decimal) as f64) as u64
+    );
+}
+
 async fn confidential_transfer(test_validator: &TestValidator, payer: &Keypair) {
-    use spl_token_2022::solana_zk_token_sdk::encryption::elgamal::ElGamalKeypair;
+    use spl_token_2022::solana_zk_sdk::encryption::elgamal::ElGamalKeypair;
 
     let config = test_config_with_default_signer(test_validator, payer, &spl_token_2022::id());
 
@@ -2549,13 +2650,13 @@ async fn confidential_transfer(test_validator: &TestValidator, payer: &Keypair) 
         auto_approve,
     );
     assert_eq!(
-        Option::<ElGamalPubkey>::from(extension.auditor_elgamal_pubkey),
+        Option::<PodElGamalPubkey>::from(extension.auditor_elgamal_pubkey),
         None,
     );
 
     // update confidential transfer mint settings
     let auditor_keypair = ElGamalKeypair::new_rand();
-    let auditor_pubkey: ElGamalPubkey = (*auditor_keypair.pubkey()).into();
+    let auditor_pubkey: PodElGamalPubkey = (*auditor_keypair.pubkey()).into();
     let new_auto_approve = true;
 
     process_test_command(
@@ -2585,7 +2686,7 @@ async fn confidential_transfer(test_validator: &TestValidator, payer: &Keypair) 
         new_auto_approve,
     );
     assert_eq!(
-        Option::<ElGamalPubkey>::from(extension.auditor_elgamal_pubkey),
+        Option::<PodElGamalPubkey>::from(extension.auditor_elgamal_pubkey),
         Some(auditor_pubkey),
     );
 
@@ -2653,7 +2754,7 @@ async fn confidential_transfer(test_validator: &TestValidator, payer: &Keypair) 
         .unwrap();
     assert!(bool::from(extension.allow_confidential_credits));
 
-    // disable and eanble non-confidential transfers for an account
+    // disable and enable non-confidential transfers for an account
     process_test_command(
         &config,
         payer,
@@ -2845,7 +2946,7 @@ async fn confidential_transfer_with_fee(test_validator: &TestValidator, payer: &
         auto_approve,
     );
     assert_eq!(
-        Option::<ElGamalPubkey>::from(extension.auditor_elgamal_pubkey),
+        Option::<PodElGamalPubkey>::from(extension.auditor_elgamal_pubkey),
         None,
     );
 
@@ -2965,9 +3066,16 @@ async fn multisig_transfer(test_validator: &TestValidator, payer: &Keypair) {
     }
 }
 
-async fn offline_multisig_transfer_with_nonce(test_validator: &TestValidator, payer: &Keypair) {
+async fn do_offline_multisig_transfer(
+    test_validator: &TestValidator,
+    payer: &Keypair,
+    compute_unit_price: Option<u64>,
+) {
     let m = 2;
     let n = 3u8;
+
+    let fee_payer_keypair_file = NamedTempFile::new().unwrap();
+    write_keypair_file(payer, &fee_payer_keypair_file).unwrap();
 
     let (multisig_members, multisig_paths): (Vec<_>, Vec<_>) = std::iter::repeat_with(Keypair::new)
         .take(n as usize)
@@ -2979,6 +3087,7 @@ async fn offline_multisig_transfer_with_nonce(test_validator: &TestValidator, pa
         .unzip();
     for program_id in VALID_TOKEN_PROGRAM_IDS.iter() {
         let mut config = test_config_with_default_signer(test_validator, payer, program_id);
+        config.compute_unit_limit = ComputeUnitLimit::Default;
         let token = create_token(&config, payer).await;
         let nonce = create_nonce(&config, payer).await;
 
@@ -3020,59 +3129,158 @@ async fn offline_multisig_transfer_with_nonce(test_validator: &TestValidator, pa
             .await
             .unwrap();
 
-        let program_client: Arc<dyn ProgramClient<ProgramRpcClientSendTransaction>> = Arc::new(
-            ProgramOfflineClient::new(blockhash, ProgramRpcClientSendTransaction),
-        );
-        config.program_client = program_client;
-        let result = exec_test_cmd(
-            &config,
-            &[
-                "spl-token",
-                CommandName::Transfer.into(),
-                &token.to_string(),
-                "10",
-                &destination.to_string(),
-                "--blockhash",
-                &blockhash.to_string(),
-                "--nonce",
-                &nonce.to_string(),
-                "--nonce-authority",
-                &payer.pubkey().to_string(),
-                "--sign-only",
-                "--mint-decimals",
-                &format!("{}", TEST_DECIMALS),
-                "--multisig-signer",
-                multisig_paths[1].path().to_str().unwrap(),
-                "--multisig-signer",
-                &multisig_members[2].to_string(),
-                "--from",
-                &source.to_string(),
-                "--owner",
-                &multisig_pubkey.to_string(),
-                "--fee-payer",
-                &multisig_members[0].to_string(),
-            ],
-        )
-        .await
-        .unwrap();
+        let offline_program_client: Arc<dyn ProgramClient<ProgramRpcClientSendTransaction>> =
+            Arc::new(ProgramOfflineClient::new(
+                blockhash,
+                ProgramRpcClientSendTransaction,
+            ));
+        let mut args = vec![
+            "spl-token".to_string(),
+            CommandName::Transfer.as_ref().to_string(),
+            token.to_string(),
+            "100".to_string(),
+            destination.to_string(),
+            "--blockhash".to_string(),
+            blockhash.to_string(),
+            "--nonce".to_string(),
+            nonce.to_string(),
+            "--nonce-authority".to_string(),
+            payer.pubkey().to_string(),
+            "--sign-only".to_string(),
+            "--mint-decimals".to_string(),
+            format!("{}", TEST_DECIMALS),
+            "--multisig-signer".to_string(),
+            multisig_paths[1].path().to_str().unwrap().to_string(),
+            "--multisig-signer".to_string(),
+            multisig_members[2].to_string(),
+            "--from".to_string(),
+            source.to_string(),
+            "--owner".to_string(),
+            multisig_pubkey.to_string(),
+            "--fee-payer".to_string(),
+            payer.pubkey().to_string(),
+            "--program-id".to_string(),
+            program_id.to_string(),
+        ];
+        if let Some(compute_unit_price) = compute_unit_price {
+            args.push("--with-compute-unit-price".to_string());
+            args.push(compute_unit_price.to_string());
+            args.push("--with-compute-unit-limit".to_string());
+            args.push(10_000.to_string());
+        }
+        config.program_client = offline_program_client;
+        let result = exec_test_cmd(&config, &args).await.unwrap();
         // the provided signer has a signature, denoted by the pubkey followed
         // by "=" and the signature
-        assert!(result.contains(&format!("{}=", multisig_members[1])));
+        let member_prefix = format!("{}=", multisig_members[1]);
+        let signature_position = result.find(&member_prefix).unwrap();
+        let end_position = result[signature_position..].find('\n').unwrap();
+        let signer = result[signature_position..].get(..end_position).unwrap();
 
         // other three expected signers are absent
         let absent_signers_position = result.find("Absent Signers").unwrap();
         let absent_signers = result.get(absent_signers_position..).unwrap();
-        assert!(absent_signers.contains(&multisig_members[0].to_string()));
         assert!(absent_signers.contains(&multisig_members[2].to_string()));
         assert!(absent_signers.contains(&payer.pubkey().to_string()));
 
         // and nothing else is marked a signer
+        assert!(!absent_signers.contains(&multisig_members[0].to_string()));
         assert!(!absent_signers.contains(&multisig_pubkey.to_string()));
         assert!(!absent_signers.contains(&nonce.to_string()));
         assert!(!absent_signers.contains(&source.to_string()));
         assert!(!absent_signers.contains(&destination.to_string()));
         assert!(!absent_signers.contains(&token.to_string()));
+
+        // now send the transaction
+        let rpc_program_client: Arc<dyn ProgramClient<ProgramRpcClientSendTransaction>> = Arc::new(
+            ProgramRpcClient::new(config.rpc_client.clone(), ProgramRpcClientSendTransaction),
+        );
+        config.program_client = rpc_program_client;
+        let mut args = vec![
+            "spl-token".to_string(),
+            CommandName::Transfer.as_ref().to_string(),
+            token.to_string(),
+            "100".to_string(),
+            destination.to_string(),
+            "--blockhash".to_string(),
+            blockhash.to_string(),
+            "--nonce".to_string(),
+            nonce.to_string(),
+            "--nonce-authority".to_string(),
+            fee_payer_keypair_file.path().to_str().unwrap().to_string(),
+            "--mint-decimals".to_string(),
+            format!("{}", TEST_DECIMALS),
+            "--multisig-signer".to_string(),
+            multisig_members[1].to_string(),
+            "--multisig-signer".to_string(),
+            multisig_paths[2].path().to_str().unwrap().to_string(),
+            "--from".to_string(),
+            source.to_string(),
+            "--owner".to_string(),
+            multisig_pubkey.to_string(),
+            "--fee-payer".to_string(),
+            fee_payer_keypair_file.path().to_str().unwrap().to_string(),
+            "--program-id".to_string(),
+            program_id.to_string(),
+            "--signer".to_string(),
+            signer.to_string(),
+        ];
+        if let Some(compute_unit_price) = compute_unit_price {
+            args.push("--with-compute-unit-price".to_string());
+            args.push(compute_unit_price.to_string());
+            args.push("--with-compute-unit-limit".to_string());
+            args.push(10_000.to_string());
+        }
+        exec_test_cmd(&config, &args).await.unwrap();
+
+        let account = config.rpc_client.get_account(&source).await.unwrap();
+        let token_account = StateWithExtensionsOwned::<Account>::unpack(account.data).unwrap();
+        let amount = spl_token::ui_amount_to_amount(0.0, TEST_DECIMALS);
+        assert_eq!(token_account.base.amount, amount);
+        let account = config.rpc_client.get_account(&destination).await.unwrap();
+        let token_account = StateWithExtensionsOwned::<Account>::unpack(account.data).unwrap();
+        let amount = spl_token::ui_amount_to_amount(100.0, TEST_DECIMALS);
+        assert_eq!(token_account.base.amount, amount);
+
+        // get new nonce
+        let nonce_account = config.rpc_client.get_account(&nonce).await.unwrap();
+        let blockhash = Hash::new(&nonce_account.data[start_hash_index..start_hash_index + 32]);
+        let mut args = vec![
+            "spl-token".to_string(),
+            CommandName::Close.as_ref().to_string(),
+            "--address".to_string(),
+            source.to_string(),
+            "--blockhash".to_string(),
+            blockhash.to_string(),
+            "--nonce".to_string(),
+            nonce.to_string(),
+            "--nonce-authority".to_string(),
+            fee_payer_keypair_file.path().to_str().unwrap().to_string(),
+            "--multisig-signer".to_string(),
+            multisig_paths[1].path().to_str().unwrap().to_string(),
+            "--multisig-signer".to_string(),
+            multisig_paths[2].path().to_str().unwrap().to_string(),
+            "--owner".to_string(),
+            multisig_pubkey.to_string(),
+            "--fee-payer".to_string(),
+            fee_payer_keypair_file.path().to_str().unwrap().to_string(),
+            "--program-id".to_string(),
+            program_id.to_string(),
+        ];
+        if let Some(compute_unit_price) = compute_unit_price {
+            args.push("--with-compute-unit-price".to_string());
+            args.push(compute_unit_price.to_string());
+            args.push("--with-compute-unit-limit".to_string());
+            args.push(10_000.to_string());
+        }
+        exec_test_cmd(&config, &args).await.unwrap();
+        let _ = config.rpc_client.get_account(&source).await.unwrap_err();
     }
+}
+
+async fn offline_multisig_transfer_with_nonce(test_validator: &TestValidator, payer: &Keypair) {
+    do_offline_multisig_transfer(test_validator, payer, None).await;
+    do_offline_multisig_transfer(test_validator, payer, Some(10)).await;
 }
 
 async fn withdraw_excess_lamports_from_multisig(test_validator: &TestValidator, payer: &Keypair) {
@@ -3700,6 +3908,107 @@ async fn transfer_hook(test_validator: &TestValidator, payer: &Keypair) {
     assert_eq!(extension.program_id, None.try_into().unwrap());
 }
 
+async fn transfer_hook_with_transfer_fee(test_validator: &TestValidator, payer: &Keypair) {
+    let program_id = spl_token_2022::id();
+    let mut config = test_config_with_default_signer(test_validator, payer, &program_id);
+    let transfer_hook_program_id = Pubkey::new_unique();
+
+    let transfer_fee_basis_points = 100;
+    let maximum_fee: u64 = 10_000_000_000;
+
+    let result = process_test_command(
+        &config,
+        payer,
+        &[
+            "spl-token",
+            CommandName::CreateToken.into(),
+            "--program-id",
+            &program_id.to_string(),
+            "--transfer-hook",
+            &transfer_hook_program_id.to_string(),
+            "--transfer-fee",
+            &transfer_fee_basis_points.to_string(),
+            &maximum_fee.to_string(),
+        ],
+    )
+    .await;
+
+    // Check that the transfer-hook extension is correctly configured
+    let value: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+    let mint = Pubkey::from_str(value["commandOutput"]["address"].as_str().unwrap()).unwrap();
+    let account = config.rpc_client.get_account(&mint).await.unwrap();
+    let mint_state = StateWithExtensionsOwned::<Mint>::unpack(account.data).unwrap();
+    let extension = mint_state.get_extension::<TransferHook>().unwrap();
+    assert_eq!(
+        extension.program_id,
+        Some(transfer_hook_program_id).try_into().unwrap()
+    );
+
+    // Check that the transfer-fee extension is correctly configured
+    let extension = mint_state.get_extension::<TransferFeeConfig>().unwrap();
+    assert_eq!(
+        u16::from(extension.older_transfer_fee.transfer_fee_basis_points),
+        transfer_fee_basis_points
+    );
+    assert_eq!(
+        u64::from(extension.older_transfer_fee.maximum_fee),
+        maximum_fee
+    );
+    assert_eq!(
+        u16::from(extension.newer_transfer_fee.transfer_fee_basis_points),
+        transfer_fee_basis_points
+    );
+    assert_eq!(
+        u64::from(extension.newer_transfer_fee.maximum_fee),
+        maximum_fee
+    );
+
+    // Make sure that parsing transfer hook accounts and expected-fee works
+    let blockhash = Hash::default();
+    let program_client: Arc<dyn ProgramClient<ProgramRpcClientSendTransaction>> = Arc::new(
+        ProgramOfflineClient::new(blockhash, ProgramRpcClientSendTransaction),
+    );
+    config.program_client = program_client;
+
+    let _result = exec_test_cmd(
+        &config,
+        &[
+            "spl-token",
+            CommandName::Transfer.into(),
+            &mint.to_string(),
+            "100",
+            &Pubkey::new_unique().to_string(),
+            "--blockhash",
+            &blockhash.to_string(),
+            "--nonce",
+            &Pubkey::new_unique().to_string(),
+            "--nonce-authority",
+            &Pubkey::new_unique().to_string(),
+            "--sign-only",
+            "--mint-decimals",
+            &format!("{}", TEST_DECIMALS),
+            "--from",
+            &Pubkey::new_unique().to_string(),
+            "--owner",
+            &Pubkey::new_unique().to_string(),
+            "--transfer-hook-account",
+            &format!("{}:readonly", Pubkey::new_unique()),
+            "--transfer-hook-account",
+            &format!("{}:writable", Pubkey::new_unique()),
+            "--transfer-hook-account",
+            &format!("{}:readonly-signer", Pubkey::new_unique()),
+            "--transfer-hook-account",
+            &format!("{}:writable-signer", Pubkey::new_unique()),
+            "--expected-fee",
+            "1",
+            "--program-id",
+            &program_id.to_string(),
+        ],
+    )
+    .await
+    .unwrap();
+}
+
 async fn metadata(test_validator: &TestValidator, payer: &Keypair) {
     let program_id = spl_token_2022::id();
     let config = test_config_with_default_signer(test_validator, payer, &program_id);
@@ -3979,7 +4288,7 @@ async fn group(test_validator: &TestValidator, payer: &Keypair) {
     let account = config.rpc_client.get_account(&mint).await.unwrap();
     let group_mint_state = StateWithExtensionsOwned::<Mint>::unpack(account.data).unwrap();
     let extension = group_mint_state.get_extension::<TokenGroup>().unwrap();
-    assert_eq!(u32::from(extension.size), 1);
+    assert_eq!(u64::from(extension.size), 1);
 
     let account = config.rpc_client.get_account(&member_mint).await.unwrap();
     let member_mint_state = StateWithExtensionsOwned::<Mint>::unpack(account.data).unwrap();
@@ -3988,7 +4297,7 @@ async fn group(test_validator: &TestValidator, payer: &Keypair) {
         .unwrap();
     assert_eq!(extension.group, mint);
     assert_eq!(extension.mint, member_mint);
-    assert_eq!(u32::from(extension.member_number), 1);
+    assert_eq!(u64::from(extension.member_number), 1);
 
     // update authority
     process_test_command(
@@ -4009,4 +4318,13 @@ async fn group(test_validator: &TestValidator, payer: &Keypair) {
     let mint_state = StateWithExtensionsOwned::<Mint>::unpack(account.data).unwrap();
     let extension = mint_state.get_extension::<TokenGroup>().unwrap();
     assert_eq!(extension.update_authority, Some(mint).try_into().unwrap());
+}
+
+async fn compute_budget(test_validator: &TestValidator, payer: &Keypair) {
+    for program_id in VALID_TOKEN_PROGRAM_IDS.iter() {
+        let mut config = test_config_with_default_signer(test_validator, payer, program_id);
+        config.compute_unit_price = Some(42);
+        config.compute_unit_limit = ComputeUnitLimit::Static(40_000);
+        run_transfer_test(&config, payer).await;
+    }
 }

@@ -34,20 +34,20 @@ jobs:
         with:
           toolchain: ${{ env.RUST_STABLE }}
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
           key: cargo-build-${{ hashFiles('**/Cargo.lock') }}-${{ env.RUST_STABLE}}
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/rustfilt
           key: cargo-sbf-bins-${{ runner.os }}
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: ~/.cache/solana
           key: solana-${{ env.SOLANA_VERSION }}
@@ -61,13 +61,6 @@ jobs:
       - name: Build and test
         run: ./ci/cargo-test-sbf.sh name-service
 
-      - name: Upload programs
-        uses: actions/upload-artifact@v3
-        with:
-          name: name-service-programs
-          path: "target/deploy/*.so"
-          if-no-files-found: error
-
   js-test:
     runs-on: ubuntu-latest
     env:
@@ -78,10 +71,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@v2
-        with:
-          version: 8
-      - uses: actions/cache@v3
+      - uses: pnpm/action-setup@v4
+      - uses: actions/cache@v4
         with:
           path: ~/.npm
           key: node-${{ hashFiles('pnpm-lock.yaml') }}

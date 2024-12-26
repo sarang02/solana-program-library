@@ -5,9 +5,11 @@ use {
     },
     bytemuck::{Pod, Zeroable},
     solana_program::entrypoint::ProgramResult,
-    solana_zk_token_sdk::zk_token_elgamal::pod::{AeCiphertext, ElGamalCiphertext, ElGamalPubkey},
+    solana_zk_sdk::encryption::pod::{
+        auth_encryption::PodAeCiphertext,
+        elgamal::{PodElGamalCiphertext, PodElGamalPubkey},
+    },
     spl_pod::{
-        bytemuck::pod_from_bytes,
         optional_keys::{OptionalNonZeroElGamalPubkey, OptionalNonZeroPubkey},
         primitives::{PodBool, PodU64},
     },
@@ -15,11 +17,14 @@ use {
 
 /// Maximum bit length of any deposit or transfer amount
 ///
-/// Any deposit or transfer amount must be less than 2^48
+/// Any deposit or transfer amount must be less than `2^48`
 pub const MAXIMUM_DEPOSIT_TRANSFER_AMOUNT: u64 = (u16::MAX as u64) + (1 << 16) * (u32::MAX as u64);
 
 /// Bit length of the low bits of pending balance plaintext
 pub const PENDING_BALANCE_LO_BIT_LENGTH: u32 = 16;
+
+/// The default maximum pending balance credit counter.
+pub const DEFAULT_MAXIMUM_PENDING_BALANCE_CREDIT_COUNTER: u64 = 65536;
 
 /// Confidential Transfer Extension instructions
 pub mod instruction;
@@ -31,27 +36,14 @@ pub mod processor;
 /// Transfer Extension
 pub mod verify_proof;
 
-/// Helper functions to generate split zero-knowledge proofs for confidential
-/// transfers in the Confidential Transfer Extension.
-///
-/// The logic in this submodule should belong to the `solana-zk-token-sdk` and
-/// will be removed with the next upgrade to the Solana program.
-#[cfg(not(target_os = "solana"))]
-pub mod split_proof_generation;
-
 /// Confidential Transfer Extension account information needed for instructions
 #[cfg(not(target_os = "solana"))]
 pub mod account_info;
 
-/// Ciphertext extraction and proof related helper logic
-///
-/// This submodule should be removed with the next upgrade to the Solana program
-pub mod ciphertext_extraction;
-
 /// ElGamal ciphertext containing an account balance
-pub type EncryptedBalance = ElGamalCiphertext;
+pub type EncryptedBalance = PodElGamalCiphertext;
 /// Authenticated encryption containing an account balance
-pub type DecryptableBalance = AeCiphertext;
+pub type DecryptableBalance = PodAeCiphertext;
 
 /// Confidential transfer mint configuration
 #[repr(C)]
@@ -72,7 +64,7 @@ pub struct ConfidentialTransferMint {
     ///   `ConfidentialTransferInstruction::ConfigureAccount`)
     pub auto_approve_new_accounts: PodBool,
 
-    /// Authority to decode any transfer amount in a confidential transafer.
+    /// Authority to decode any transfer amount in a confidential transfer.
     pub auditor_elgamal_pubkey: OptionalNonZeroElGamalPubkey,
 }
 
@@ -90,7 +82,7 @@ pub struct ConfidentialTransferAccount {
     pub approved: PodBool,
 
     /// The public key associated with ElGamal encryption
-    pub elgamal_pubkey: ElGamalPubkey,
+    pub elgamal_pubkey: PodElGamalPubkey,
 
     /// The low 16 bits of the pending balance (encrypted by `elgamal_pubkey`)
     pub pending_balance_lo: EncryptedBalance,
@@ -98,7 +90,7 @@ pub struct ConfidentialTransferAccount {
     /// The high 48 bits of the pending balance (encrypted by `elgamal_pubkey`)
     pub pending_balance_hi: EncryptedBalance,
 
-    /// The available balance (encrypted by `encrypiton_pubkey`)
+    /// The available balance (encrypted by `encryption_pubkey`)
     pub available_balance: EncryptedBalance,
 
     /// The decryptable available balance

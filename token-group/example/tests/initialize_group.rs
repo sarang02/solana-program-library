@@ -39,7 +39,7 @@ async fn test_initialize_group() {
     );
     setup_mint(&token_client, &group_mint, &group_mint_authority).await;
 
-    let mut context = context.lock().await;
+    let context = context.lock().await;
 
     let rent = context.banks_client.get_rent().await.unwrap();
     let space = TlvStateBorrowed::get_base_len() + std::mem::size_of::<TokenGroup>();
@@ -51,7 +51,7 @@ async fn test_initialize_group() {
         &group.pubkey(),
         &group_mint.pubkey(),
         &group_mint_authority.pubkey(),
-        group_state.update_authority.try_into().unwrap(),
+        group_state.update_authority.into(),
         group_state.max_size.into(),
     );
     init_group_ix.accounts[2].is_signer = false;
@@ -95,7 +95,7 @@ async fn test_initialize_group() {
                 &group.pubkey(),
                 &group_mint.pubkey(),
                 &group_mint_authority.pubkey(),
-                group_state.update_authority.try_into().unwrap(),
+                group_state.update_authority.into(),
                 group_state.max_size.into(),
             ),
         ],

@@ -10,7 +10,7 @@ on:
       - ".github/workflows/pull-request-account-compression.yml"
       - "!account-compression/sdk/**"
   push:
-    branches: [master]
+    branches: [master, ac-mainnet-tag]
     paths:
       - "account-compression/**"
       - "libraries/concurrent-merkle-tree/**"
@@ -18,6 +18,7 @@ on:
       - "ci/install-anchor.sh"
       - ".github/workflows/pull-request-account-compression.yml"
       - "!account-compression/sdk/**"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -31,10 +32,11 @@ jobs:
 
       - name: Set env vars
         run: |
+          echo "RUST_STABLE_VERSION=1.78.0" >> $GITHUB_ENV
+          echo "SOLANA_VERSION=v2.0.14" >> $GITHUB_ENV
           source ci/rust-version.sh
           echo "RUST_STABLE=$rust_stable" >> $GITHUB_ENV
           source ci/solana-version.sh
-          echo "SOLANA_VERSION=$solana_version" >> $GITHUB_ENV
           source ci/install-anchor.sh
           echo "ANCHOR_CLI_VERSION=$anchor_cli_version" >> $GITHUB_ENV
 
@@ -42,20 +44,20 @@ jobs:
         with:
           toolchain: ${{ env.RUST_STABLE }}
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
           key: cargo-build-${{ hashFiles('**/Cargo.lock') }}-${{ env.RUST_STABLE }}
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/rustfilt
           key: cargo-sbf-bins-${{ runner.os }}
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: ~/.cache/solana
           key: solana-${{ env.SOLANA_VERSION }}
@@ -70,7 +72,7 @@ jobs:
         run: ./ci/cargo-test-sbf.sh account-compression
 
       - name: Upload programs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: account-compression-programs
           path: "account-compression/target/deploy/*.so"
@@ -79,20 +81,20 @@ jobs:
   js-test-account-compression:
     runs-on: ubuntu-latest
     env:
-      NODE_VERSION: 16.x
+      NODE_VERSION: 20.X
     steps:
       - uses: actions/checkout@v4
       - name: Use Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@v2
-        with:
-          version: 8
-      - uses: actions/cache@v3
+      - uses: pnpm/action-setup@v4
+      - uses: actions/cache@v4
         with:
           path: ~/.npm
           key: node-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             node-
+      - name: Set env vars
+        run: echo "SOLANA_VERSION=v2.0.14" >> $GITHUB_ENV
       - run: ./ci/js-test-account-compression.sh

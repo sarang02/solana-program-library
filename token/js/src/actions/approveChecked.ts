@@ -10,6 +10,7 @@ import { getSigners } from './internal.js';
  *
  * @param connection     Connection to use
  * @param payer          Payer of the transaction fees
+ * @param mint           Address of the mint
  * @param account        Address of the account
  * @param delegate       Account authorized to perform a transfer tokens from the source account
  * @param owner          Owner of the source account
@@ -32,7 +33,7 @@ export async function approveChecked(
     decimals: number,
     multiSigners: Signer[] = [],
     confirmOptions?: ConfirmOptions,
-    programId = TOKEN_PROGRAM_ID
+    programId = TOKEN_PROGRAM_ID,
 ): Promise<TransactionSignature> {
     const [ownerPublicKey, signers] = getSigners(owner, multiSigners);
 
@@ -45,8 +46,8 @@ export async function approveChecked(
             amount,
             decimals,
             multiSigners,
-            programId
-        )
+            programId,
+        ),
     );
 
     return await sendAndConfirmTransaction(connection, transaction, [payer, ...signers], confirmOptions);

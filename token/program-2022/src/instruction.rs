@@ -12,9 +12,8 @@ use {
 };
 use {
     crate::{
-        check_program_account, check_spl_token_program_account,
-        error::TokenError,
-        extension::{transfer_fee::instruction::TransferFeeInstruction, ExtensionType},
+        check_program_account, check_spl_token_program_account, error::TokenError,
+        extension::ExtensionType,
     },
     bytemuck::Pod,
     solana_program::{
@@ -35,9 +34,9 @@ use {
 pub const MIN_SIGNERS: usize = 1;
 /// Maximum number of multisignature signers (max N)
 pub const MAX_SIGNERS: usize = 11;
-/// Serialized length of a u16, for unpacking
+/// Serialized length of a `u16`, for unpacking
 const U16_BYTES: usize = 2;
-/// Serialized length of a u64, for unpacking
+/// Serialized length of a `u64`, for unpacking
 const U64_BYTES: usize = 8;
 
 /// Instructions supported by the token program.
@@ -49,6 +48,7 @@ const U64_BYTES: usize = 8;
 )]
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenInstruction<'a> {
+    // 0
     /// Initializes a new mint and optionally deposits all the newly minted
     /// tokens in an account.
     ///
@@ -110,8 +110,8 @@ pub enum TokenInstruction<'a> {
     ///
     ///   0. `[writable]` The multisignature account to initialize.
     ///   1. `[]` Rent sysvar
-    ///   2. ..2+N. `[]` The signer accounts, must equal to N where 1 <= N <=
-    ///      11.
+    ///   2. ..`2+N`. `[]` The signer accounts, must equal to N where `1 <= N <=
+    ///      11`.
     InitializeMultisig {
         /// The number of signers (M) required to validate this multisignature
         /// account.
@@ -140,7 +140,7 @@ pub enum TokenInstruction<'a> {
     ///   0. `[writable]` The source account.
     ///   1. `[writable]` The destination account.
     ///   2. `[]` The source account's multisignature owner/delegate.
-    ///   3. ..3+M `[signer]` M signer accounts.
+    ///   3. ..`3+M` `[signer]` M signer accounts.
     #[deprecated(
         since = "4.0.0",
         note = "please use `TransferChecked` or `TransferCheckedWithFee` instead"
@@ -163,11 +163,12 @@ pub enum TokenInstruction<'a> {
     ///   0. `[writable]` The source account.
     ///   1. `[]` The delegate.
     ///   2. `[]` The source account's multisignature owner.
-    ///   3. ..3+M `[signer]` M signer accounts
+    ///   3. ..`3+M` `[signer]` M signer accounts
     Approve {
         /// The amount of tokens the delegate is approved for.
         amount: u64,
     },
+    // 5
     /// Revokes the delegate's authority.
     ///
     /// Accounts expected by this instruction:
@@ -179,7 +180,7 @@ pub enum TokenInstruction<'a> {
     ///   * Multisignature owner
     ///   0. `[writable]` The source account.
     ///   1. `[]` The source account's multisignature owner or current delegate.
-    ///   2. ..2+M `[signer]` M signer accounts
+    ///   2. ..`2+M` `[signer]` M signer accounts
     Revoke,
     /// Sets a new authority of a mint or account.
     ///
@@ -192,7 +193,7 @@ pub enum TokenInstruction<'a> {
     ///   * Multisignature authority
     ///   0. `[writable]` The mint or account to change the authority of.
     ///   1. `[]` The mint's or account's current multisignature authority.
-    ///   2. ..2+M `[signer]` M signer accounts
+    ///   2. ..`2+M` `[signer]` M signer accounts
     SetAuthority {
         /// The type of authority to update.
         authority_type: AuthorityType,
@@ -214,7 +215,7 @@ pub enum TokenInstruction<'a> {
     ///   0. `[writable]` The mint.
     ///   1. `[writable]` The account to mint tokens to.
     ///   2. `[]` The mint's multisignature mint-tokens authority.
-    ///   3. ..3+M `[signer]` M signer accounts.
+    ///   3. ..`3+M` `[signer]` M signer accounts.
     MintTo {
         /// The amount of new tokens to mint.
         amount: u64,
@@ -233,7 +234,7 @@ pub enum TokenInstruction<'a> {
     ///   0. `[writable]` The account to burn from.
     ///   1. `[writable]` The token mint.
     ///   2. `[]` The account's multisignature owner/delegate.
-    ///   3. ..3+M `[signer]` M signer accounts.
+    ///   3. ..`3+M` `[signer]` M signer accounts.
     Burn {
         /// The amount of tokens to burn.
         amount: u64,
@@ -271,9 +272,10 @@ pub enum TokenInstruction<'a> {
     ///   0. `[writable]` The account to close.
     ///   1. `[writable]` The destination account.
     ///   2. `[]` The account's multisignature owner.
-    ///   3. ..3+M `[signer]` M signer accounts.
+    ///   3. ..`3+M` `[signer]` M signer accounts.
     CloseAccount,
-    /// Freeze an Initialized account using the Mint's freeze_authority (if
+    // 10
+    /// Freeze an Initialized account using the Mint's `freeze_authority` (if
     /// set).
     ///
     /// Accounts expected by this instruction:
@@ -287,9 +289,9 @@ pub enum TokenInstruction<'a> {
     ///   0. `[writable]` The account to freeze.
     ///   1. `[]` The token mint.
     ///   2. `[]` The mint's multisignature freeze authority.
-    ///   3. ..3+M `[signer]` M signer accounts.
+    ///   3. ..`3+M` `[signer]` M signer accounts.
     FreezeAccount,
-    /// Thaw a Frozen account using the Mint's freeze_authority (if set).
+    /// Thaw a Frozen account using the Mint's `freeze_authority` (if set).
     ///
     /// Accounts expected by this instruction:
     ///
@@ -302,7 +304,7 @@ pub enum TokenInstruction<'a> {
     ///   0. `[writable]` The account to freeze.
     ///   1. `[]` The token mint.
     ///   2. `[]` The mint's multisignature freeze authority.
-    ///   3. ..3+M `[signer]` M signer accounts.
+    ///   3. ..`3+M` `[signer]` M signer accounts.
     ThawAccount,
 
     /// Transfers tokens from one account to another either directly or via a
@@ -310,7 +312,7 @@ pub enum TokenInstruction<'a> {
     /// amounts of SOL and Tokens will be transferred to the destination
     /// account.
     ///
-    /// This instruction differs from Transfer in that the token mint and
+    /// This instruction differs from `Transfer` in that the token mint and
     /// decimals value is checked by the caller.  This may be useful when
     /// creating transactions offline or within a hardware wallet.
     ///
@@ -330,7 +332,7 @@ pub enum TokenInstruction<'a> {
     ///   1. `[]` The token mint.
     ///   2. `[writable]` The destination account.
     ///   3. `[]` The source account's multisignature owner/delegate.
-    ///   4. ..4+M `[signer]` M signer accounts.
+    ///   4. ..`4+M` `[signer]` M signer accounts.
     TransferChecked {
         /// The amount of tokens to transfer.
         amount: u64,
@@ -340,7 +342,7 @@ pub enum TokenInstruction<'a> {
     /// Approves a delegate.  A delegate is given the authority over tokens on
     /// behalf of the source account's owner.
     ///
-    /// This instruction differs from Approve in that the token mint and
+    /// This instruction differs from `Approve` in that the token mint and
     /// decimals value is checked by the caller.  This may be useful when
     /// creating transactions offline or within a hardware wallet.
     ///
@@ -357,7 +359,7 @@ pub enum TokenInstruction<'a> {
     ///   1. `[]` The token mint.
     ///   2. `[]` The delegate.
     ///   3. `[]` The source account's multisignature owner.
-    ///   4. ..4+M `[signer]` M signer accounts
+    ///   4. ..`4+M` `[signer]` M signer accounts
     ApproveChecked {
         /// The amount of tokens the delegate is approved for.
         amount: u64,
@@ -367,7 +369,7 @@ pub enum TokenInstruction<'a> {
     /// Mints new tokens to an account.  The native mint does not support
     /// minting.
     ///
-    /// This instruction differs from MintTo in that the decimals value is
+    /// This instruction differs from `MintTo` in that the decimals value is
     /// checked by the caller.  This may be useful when creating transactions
     /// offline or within a hardware wallet.
     ///
@@ -382,20 +384,21 @@ pub enum TokenInstruction<'a> {
     ///   0. `[writable]` The mint.
     ///   1. `[writable]` The account to mint tokens to.
     ///   2. `[]` The mint's multisignature mint-tokens authority.
-    ///   3. ..3+M `[signer]` M signer accounts.
+    ///   3. ..`3+M` `[signer]` M signer accounts.
     MintToChecked {
         /// The amount of new tokens to mint.
         amount: u64,
         /// Expected number of base 10 digits to the right of the decimal place.
         decimals: u8,
     },
+    // 15
     /// Burns tokens by removing them from an account.  `BurnChecked` does not
     /// support accounts associated with the native mint, use `CloseAccount`
     /// instead.
     ///
-    /// This instruction differs from Burn in that the decimals value is checked
-    /// by the caller. This may be useful when creating transactions offline or
-    /// within a hardware wallet.
+    /// This instruction differs from `Burn` in that the decimals value is
+    /// checked by the caller. This may be useful when creating transactions
+    /// offline or within a hardware wallet.
     ///
     /// Accounts expected by this instruction:
     ///
@@ -408,14 +411,14 @@ pub enum TokenInstruction<'a> {
     ///   0. `[writable]` The account to burn from.
     ///   1. `[writable]` The token mint.
     ///   2. `[]` The account's multisignature owner/delegate.
-    ///   3. ..3+M `[signer]` M signer accounts.
+    ///   3. ..`3+M` `[signer]` M signer accounts.
     BurnChecked {
         /// The amount of tokens to burn.
         amount: u64,
         /// Expected number of base 10 digits to the right of the decimal place.
         decimals: u8,
     },
-    /// Like InitializeAccount, but the owner pubkey is passed via instruction
+    /// Like `InitializeAccount`, but the owner pubkey is passed via instruction
     /// data rather than the accounts list. This variant may be preferable
     /// when using Cross Program Invocation from an instruction that does
     /// not need the owner's `AccountInfo` otherwise.
@@ -441,7 +444,7 @@ pub enum TokenInstruction<'a> {
     ///   0. `[writable]`  The native token account to sync with its underlying
     ///      lamports.
     SyncNative,
-    /// Like InitializeAccount2, but does not require the Rent sysvar to be
+    /// Like `InitializeAccount2`, but does not require the Rent sysvar to be
     /// provided
     ///
     /// Accounts expected by this instruction:
@@ -453,20 +456,22 @@ pub enum TokenInstruction<'a> {
         #[cfg_attr(feature = "serde-traits", serde(with = "As::<DisplayFromStr>"))]
         owner: Pubkey,
     },
-    /// Like InitializeMultisig, but does not require the Rent sysvar to be
+    /// Like `InitializeMultisig`, but does not require the Rent sysvar to be
     /// provided
     ///
     /// Accounts expected by this instruction:
     ///
     ///   0. `[writable]` The multisignature account to initialize.
-    ///   1. ..1+N. `[]` The signer accounts, must equal to N where 1 <= N <=
-    ///      11.
+    ///   1. ..`1+N`. `[]` The signer accounts, must equal to N where `1 <= N <=
+    ///      11`.
     InitializeMultisig2 {
         /// The number of signers (M) required to validate this multisignature
         /// account.
         m: u8,
     },
-    /// Like InitializeMint, but does not require the Rent sysvar to be provided
+    // 20
+    /// Like `InitializeMint`, but does not require the Rent sysvar to be
+    /// provided
     ///
     /// Accounts expected by this instruction:
     ///
@@ -506,7 +511,7 @@ pub enum TokenInstruction<'a> {
     /// Data expected by this instruction:
     ///   None
     InitializeImmutableOwner,
-    /// Convert an Amount of tokens to a UiAmount `string`, using the given
+    /// Convert an Amount of tokens to a `UiAmount` string, using the given
     /// mint.
     ///
     /// Fails on an invalid mint.
@@ -521,8 +526,8 @@ pub enum TokenInstruction<'a> {
         /// The amount of tokens to convert.
         amount: u64,
     },
-    /// Convert a UiAmount of tokens to a little-endian `u64` raw Amount, using
-    /// the given mint.
+    /// Convert a `UiAmount` of tokens to a little-endian `u64` raw Amount,
+    /// using the given mint.
     ///
     /// Return data can be fetched using `sol_get_return_data` and deserializing
     /// the return data as a little-endian `u64`.
@@ -531,9 +536,10 @@ pub enum TokenInstruction<'a> {
     ///
     ///   0. `[]` The mint to calculate for
     UiAmountToAmount {
-        /// The ui_amount of tokens to convert.
+        /// The `ui_amount` of tokens to convert.
         ui_amount: &'a str,
     },
+    // 25
     /// Initialize the close account authority on a new mint.
     ///
     /// Fails if the mint has already been initialized, so must be called before
@@ -556,7 +562,7 @@ pub enum TokenInstruction<'a> {
     /// See `extension::transfer_fee::instruction::TransferFeeInstruction` for
     /// further details about the extended instructions that share this
     /// instruction prefix
-    TransferFeeExtension(TransferFeeInstruction),
+    TransferFeeExtension,
     /// The common instruction prefix for Confidential Transfer extension
     /// instructions.
     ///
@@ -572,7 +578,7 @@ pub enum TokenInstruction<'a> {
     /// instruction prefix
     DefaultAccountStateExtension,
     /// Check to see if a token account is large enough for a list of
-    /// ExtensionTypes, and if not, use reallocation to increase the data
+    /// `ExtensionTypes`, and if not, use reallocation to increase the data
     /// size.
     ///
     /// Accounts expected by this instruction:
@@ -588,11 +594,12 @@ pub enum TokenInstruction<'a> {
     ///   1. `[signer, writable]` The payer account to fund reallocation
     ///   2. `[]` System program for reallocation funding
     ///   3. `[]` The account's multisignature owner/delegate.
-    ///   4. ..4+M `[signer]` M signer accounts.
+    ///   4. ..`4+M` `[signer]` M signer accounts.
     Reallocate {
         /// New extension types to include in the reallocated account
         extension_types: Vec<ExtensionType>,
     },
+    // 30
     /// The common instruction prefix for Memo Transfer account extension
     /// instructions.
     ///
@@ -638,6 +645,7 @@ pub enum TokenInstruction<'a> {
     /// further details about the extended instructions that share this
     /// instruction prefix
     CpiGuardExtension,
+    // 35
     /// Initialize the permanent delegate on a new mint.
     ///
     /// Fails if the mint has already been initialized, so must be called before
@@ -671,14 +679,14 @@ pub enum TokenInstruction<'a> {
     /// for further details about the extended instructions that share this
     /// instruction prefix
     ConfidentialTransferFeeExtension,
-    /// This instruction is to be used to rescue SOLs sent to any TokenProgram
+    /// This instruction is to be used to rescue SOL sent to any `TokenProgram`
     /// owned account by sending them to any other account, leaving behind only
     /// lamports for rent exemption.
     ///
     /// 0. `[writable]` Source Account owned by the token program
     /// 1. `[writable]` Destination account
     /// 2. `[signer]` Authority
-    /// 3. ..2+M `[signer]` M signer accounts.
+    /// 3. ..`3+M` `[signer]` M signer accounts.
     WithdrawExcessLamports,
     /// The common instruction prefix for metadata pointer extension
     /// instructions.
@@ -687,6 +695,7 @@ pub enum TokenInstruction<'a> {
     /// for further details about the extended instructions that share this
     /// instruction prefix
     MetadataPointerExtension,
+    // 40
     /// The common instruction prefix for group pointer extension instructions.
     ///
     /// See `extension::group_pointer::instruction::GroupPointerInstruction`
@@ -700,10 +709,18 @@ pub enum TokenInstruction<'a> {
     /// for further details about the extended instructions that share this
     /// instruction prefix
     GroupMemberPointerExtension,
+    /// Instruction prefix for instructions to the confidential-mint-burn
+    /// extension
+    ConfidentialMintBurnExtension,
+    /// Instruction prefix for instructions to the scaled ui amount
+    /// extension
+    ScaledUiAmountExtension,
+    /// Instruction prefix for instructions to the pausable extension
+    PausableExtension,
 }
 impl<'a> TokenInstruction<'a> {
     /// Unpacks a byte buffer into a
-    /// [TokenInstruction](enum.TokenInstruction.html).
+    /// [`TokenInstruction`](enum.TokenInstruction.html).
     pub fn unpack(input: &'a [u8]) -> Result<Self, ProgramError> {
         use TokenError::InvalidInstruction;
 
@@ -814,10 +831,7 @@ impl<'a> TokenInstruction<'a> {
                 let (close_authority, _rest) = Self::unpack_pubkey_option(rest)?;
                 Self::InitializeMintCloseAuthority { close_authority }
             }
-            26 => {
-                let (instruction, _rest) = TransferFeeInstruction::unpack(rest)?;
-                Self::TransferFeeExtension(instruction)
-            }
+            26 => Self::TransferFeeExtension,
             27 => Self::ConfidentialTransferExtension,
             28 => Self::DefaultAccountStateExtension,
             29 => {
@@ -842,11 +856,14 @@ impl<'a> TokenInstruction<'a> {
             39 => Self::MetadataPointerExtension,
             40 => Self::GroupPointerExtension,
             41 => Self::GroupMemberPointerExtension,
+            42 => Self::ConfidentialMintBurnExtension,
+            43 => Self::ScaledUiAmountExtension,
+            44 => Self::PausableExtension,
             _ => return Err(TokenError::InvalidInstruction.into()),
         })
     }
 
-    /// Packs a [TokenInstruction](enum.TokenInstruction.html) into a byte
+    /// Packs a [`TokenInstruction`](enum.TokenInstruction.html) into a byte
     /// buffer.
     pub fn pack(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(size_of::<Self>());
@@ -961,9 +978,8 @@ impl<'a> TokenInstruction<'a> {
                 buf.push(25);
                 Self::pack_pubkey_option(close_authority, &mut buf);
             }
-            Self::TransferFeeExtension(instruction) => {
+            Self::TransferFeeExtension => {
                 buf.push(26);
-                TransferFeeInstruction::pack(instruction, &mut buf);
             }
             &Self::ConfidentialTransferExtension => {
                 buf.push(27);
@@ -1013,6 +1029,15 @@ impl<'a> TokenInstruction<'a> {
             }
             &Self::GroupMemberPointerExtension => {
                 buf.push(41);
+            }
+            &Self::ConfidentialMintBurnExtension => {
+                buf.push(42);
+            }
+            &Self::ScaledUiAmountExtension => {
+                buf.push(43);
+            }
+            &Self::PausableExtension => {
+                buf.push(44);
             }
         };
         buf
@@ -1074,7 +1099,7 @@ impl<'a> TokenInstruction<'a> {
     }
 }
 
-/// Specifies the authority type for SetAuthority instructions
+/// Specifies the authority type for `SetAuthority` instructions
 #[repr(u8)]
 #[cfg_attr(feature = "serde-traits", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde-traits", serde(rename_all = "camelCase"))]
@@ -1098,7 +1123,7 @@ pub enum AuthorityType {
     InterestRate,
     /// Authority to transfer or burn any tokens for a mint
     PermanentDelegate,
-    /// Authority to update confidential transfer mint and aprove accounts for
+    /// Authority to update confidential transfer mint and approve accounts for
     /// confidential transfers
     ConfidentialTransferMint,
     /// Authority to set the transfer hook program id
@@ -1111,6 +1136,10 @@ pub enum AuthorityType {
     GroupPointer,
     /// Authority to set the group member address
     GroupMemberPointer,
+    /// Authority to set the UI amount scale
+    ScaledUiAmount,
+    /// Authority to pause or resume minting / transferring / burning
+    Pause,
 }
 
 impl AuthorityType {
@@ -1131,10 +1160,12 @@ impl AuthorityType {
             AuthorityType::MetadataPointer => 12,
             AuthorityType::GroupPointer => 13,
             AuthorityType::GroupMemberPointer => 14,
+            AuthorityType::ScaledUiAmount => 15,
+            AuthorityType::Pause => 16,
         }
     }
 
-    fn from(index: u8) -> Result<Self, ProgramError> {
+    pub(crate) fn from(index: u8) -> Result<Self, ProgramError> {
         match index {
             0 => Ok(AuthorityType::MintTokens),
             1 => Ok(AuthorityType::FreezeAccount),
@@ -1151,6 +1182,8 @@ impl AuthorityType {
             12 => Ok(AuthorityType::MetadataPointer),
             13 => Ok(AuthorityType::GroupPointer),
             14 => Ok(AuthorityType::GroupMemberPointer),
+            15 => Ok(AuthorityType::ScaledUiAmount),
+            16 => Ok(AuthorityType::Pause),
             _ => Err(TokenError::InvalidInstruction.into()),
         }
     }
@@ -1918,7 +1951,8 @@ pub fn initialize_permanent_delegate(
     })
 }
 
-/// Utility function that checks index is between MIN_SIGNERS and MAX_SIGNERS
+/// Utility function that checks index is between `MIN_SIGNERS` and
+/// `MAX_SIGNERS`
 pub fn is_valid_signer_index(index: usize) -> bool {
     (MIN_SIGNERS..=MAX_SIGNERS).contains(&index)
 }
@@ -1938,11 +1972,29 @@ pub fn decode_instruction_type<T: TryFrom<u8>>(input: &[u8]) -> Result<T, Progra
 /// instruction type as the first byte.  This makes the code concise and safe
 /// at the expense of clarity, allowing flows such as:
 ///
-/// match decode_instruction_type(input)? {
+/// ```
+/// use spl_token_2022::instruction::{decode_instruction_data, decode_instruction_type};
+/// use num_enum::TryFromPrimitive;
+/// use bytemuck::{Pod, Zeroable};
+///
+/// #[repr(u8)]
+/// #[derive(Clone, Copy, TryFromPrimitive)]
+/// enum InstructionType {
+///     First
+/// }
+/// #[derive(Pod, Zeroable, Copy, Clone)]
+/// #[repr(transparent)]
+/// struct FirstData {
+///     a: u8,
+/// }
+/// let input = [0, 1];
+/// match decode_instruction_type(&input).unwrap() {
 ///     InstructionType::First => {
-///         let FirstData { ... } = decode_instruction_data(input)?;
+///         let FirstData { a } = decode_instruction_data(&input).unwrap();
+///         assert_eq!(*a, 1);
 ///     }
 /// }
+/// ```
 pub fn decode_instruction_data<T: Pod>(input_with_type: &[u8]) -> Result<&T, ProgramError> {
     if input_with_type.len() != pod_get_packed_len::<T>().saturating_add(1) {
         Err(ProgramError::InvalidInstructionData)
@@ -1998,14 +2050,17 @@ pub fn withdraw_excess_lamports(
 
 #[cfg(test)]
 mod test {
-    use {super::*, proptest::prelude::*};
+    use {super::*, crate::pod_instruction::*, proptest::prelude::*};
 
     #[test]
-    fn test_instruction_packing() {
+    fn test_initialize_mint_packing() {
+        let decimals = 2;
+        let mint_authority = Pubkey::new_from_array([1u8; 32]);
+        let freeze_authority = COption::None;
         let check = TokenInstruction::InitializeMint {
-            decimals: 2,
-            mint_authority: Pubkey::new_from_array([1u8; 32]),
-            freeze_authority: COption::None,
+            decimals,
+            mint_authority,
+            freeze_authority,
         };
         let packed = check.pack();
         let mut expect = Vec::from([0u8, 2]);
@@ -2014,11 +2069,20 @@ mod test {
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::InitializeMint);
+        let (pod, pod_freeze_authority) =
+            decode_instruction_data_with_coption_pubkey::<InitializeMintData>(&packed).unwrap();
+        assert_eq!(pod.decimals, decimals);
+        assert_eq!(pod.mint_authority, mint_authority);
+        assert_eq!(pod_freeze_authority, freeze_authority.into());
 
+        let mint_authority = Pubkey::new_from_array([2u8; 32]);
+        let freeze_authority = COption::Some(Pubkey::new_from_array([3u8; 32]));
         let check = TokenInstruction::InitializeMint {
-            decimals: 2,
-            mint_authority: Pubkey::new_from_array([2u8; 32]),
-            freeze_authority: COption::Some(Pubkey::new_from_array([3u8; 32])),
+            decimals,
+            mint_authority,
+            freeze_authority,
         };
         let packed = check.pack();
         let mut expect = vec![0u8, 2];
@@ -2029,45 +2093,95 @@ mod test {
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::InitializeMint);
+        let (pod, pod_freeze_authority) =
+            decode_instruction_data_with_coption_pubkey::<InitializeMintData>(&packed).unwrap();
+        assert_eq!(pod.decimals, decimals);
+        assert_eq!(pod.mint_authority, mint_authority);
+        assert_eq!(pod_freeze_authority, freeze_authority.into());
+    }
+
+    #[test]
+    fn test_initialize_account_packing() {
         let check = TokenInstruction::InitializeAccount;
         let packed = check.pack();
         let expect = Vec::from([1u8]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::InitializeAccount);
+    }
 
-        let check = TokenInstruction::InitializeMultisig { m: 1 };
+    #[test]
+    fn test_initialize_multisig_packing() {
+        let m = 1;
+        let check = TokenInstruction::InitializeMultisig { m };
         let packed = check.pack();
         let expect = Vec::from([2u8, 1]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::InitializeMultisig);
+        let pod = decode_instruction_data::<InitializeMultisigData>(&packed).unwrap();
+        assert_eq!(pod.m, m);
+    }
+
+    #[test]
+    fn test_transfer_packing() {
+        let amount = 1;
         #[allow(deprecated)]
-        let check = TokenInstruction::Transfer { amount: 1 };
+        let check = TokenInstruction::Transfer { amount };
         let packed = check.pack();
         let expect = Vec::from([3u8, 1, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::Approve { amount: 1 };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::Transfer);
+        let pod = decode_instruction_data::<AmountData>(&packed).unwrap();
+        assert_eq!(pod.amount, amount.into());
+    }
+
+    #[test]
+    fn test_approve_packing() {
+        let amount = 1;
+        let check = TokenInstruction::Approve { amount };
         let packed = check.pack();
         let expect = Vec::from([4u8, 1, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::Approve);
+        let pod = decode_instruction_data::<AmountData>(&packed).unwrap();
+        assert_eq!(pod.amount, amount.into());
+    }
+
+    #[test]
+    fn test_revoke_packing() {
         let check = TokenInstruction::Revoke;
         let packed = check.pack();
         let expect = Vec::from([5u8]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::Revoke);
+    }
 
+    #[test]
+    fn test_set_authority_packing() {
+        let authority_type = AuthorityType::FreezeAccount;
+        let new_authority = COption::Some(Pubkey::new_from_array([4u8; 32]));
         let check = TokenInstruction::SetAuthority {
-            authority_type: AuthorityType::FreezeAccount,
-            new_authority: COption::Some(Pubkey::new_from_array([4u8; 32])),
+            authority_type: authority_type.clone(),
+            new_authority,
         };
         let packed = check.pack();
         let mut expect = Vec::from([6u8, 1]);
@@ -2077,84 +2191,161 @@ mod test {
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::MintTo { amount: 1 };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::SetAuthority);
+        let (pod, pod_new_authority) =
+            decode_instruction_data_with_coption_pubkey::<SetAuthorityData>(&packed).unwrap();
+        assert_eq!(
+            AuthorityType::from(pod.authority_type).unwrap(),
+            authority_type
+        );
+        assert_eq!(pod_new_authority, new_authority.into());
+    }
+
+    #[test]
+    fn test_mint_to_packing() {
+        let amount = 1;
+        let check = TokenInstruction::MintTo { amount };
         let packed = check.pack();
         let expect = Vec::from([7u8, 1, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::Burn { amount: 1 };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::MintTo);
+        let pod = decode_instruction_data::<AmountData>(&packed).unwrap();
+        assert_eq!(pod.amount, amount.into());
+    }
+
+    #[test]
+    fn test_burn_packing() {
+        let amount = 1;
+        let check = TokenInstruction::Burn { amount };
         let packed = check.pack();
         let expect = Vec::from([8u8, 1, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::Burn);
+        let pod = decode_instruction_data::<AmountData>(&packed).unwrap();
+        assert_eq!(pod.amount, amount.into());
+    }
+
+    #[test]
+    fn test_close_account_packing() {
         let check = TokenInstruction::CloseAccount;
         let packed = check.pack();
         let expect = Vec::from([9u8]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::CloseAccount);
+    }
 
+    #[test]
+    fn test_freeze_account_packing() {
         let check = TokenInstruction::FreezeAccount;
         let packed = check.pack();
         let expect = Vec::from([10u8]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::FreezeAccount);
+    }
 
+    #[test]
+    fn test_thaw_account_packing() {
         let check = TokenInstruction::ThawAccount;
         let packed = check.pack();
         let expect = Vec::from([11u8]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::ThawAccount);
+    }
 
-        let check = TokenInstruction::TransferChecked {
-            amount: 1,
-            decimals: 2,
-        };
+    #[test]
+    fn test_transfer_checked_packing() {
+        let amount = 1;
+        let decimals = 2;
+        let check = TokenInstruction::TransferChecked { amount, decimals };
         let packed = check.pack();
         let expect = Vec::from([12u8, 1, 0, 0, 0, 0, 0, 0, 0, 2]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::ApproveChecked {
-            amount: 1,
-            decimals: 2,
-        };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::TransferChecked);
+        let pod = decode_instruction_data::<AmountCheckedData>(&packed).unwrap();
+        assert_eq!(pod.amount, amount.into());
+        assert_eq!(pod.decimals, decimals);
+    }
+
+    #[test]
+    fn test_approve_checked_packing() {
+        let amount = 1;
+        let decimals = 2;
+
+        let check = TokenInstruction::ApproveChecked { amount, decimals };
         let packed = check.pack();
         let expect = Vec::from([13u8, 1, 0, 0, 0, 0, 0, 0, 0, 2]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::MintToChecked {
-            amount: 1,
-            decimals: 2,
-        };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::ApproveChecked);
+        let pod = decode_instruction_data::<AmountCheckedData>(&packed).unwrap();
+        assert_eq!(pod.amount, amount.into());
+        assert_eq!(pod.decimals, decimals);
+    }
+
+    #[test]
+    fn test_mint_to_checked_packing() {
+        let amount = 1;
+        let decimals = 2;
+        let check = TokenInstruction::MintToChecked { amount, decimals };
         let packed = check.pack();
         let expect = Vec::from([14u8, 1, 0, 0, 0, 0, 0, 0, 0, 2]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::MintToChecked);
+        let pod = decode_instruction_data::<AmountCheckedData>(&packed).unwrap();
+        assert_eq!(pod.amount, amount.into());
+        assert_eq!(pod.decimals, decimals);
+    }
 
-        let check = TokenInstruction::BurnChecked {
-            amount: 1,
-            decimals: 2,
-        };
+    #[test]
+    fn test_burn_checked_packing() {
+        let amount = 1;
+        let decimals = 2;
+        let check = TokenInstruction::BurnChecked { amount, decimals };
         let packed = check.pack();
         let expect = Vec::from([15u8, 1, 0, 0, 0, 0, 0, 0, 0, 2]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::InitializeAccount2 {
-            owner: Pubkey::new_from_array([2u8; 32]),
-        };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::BurnChecked);
+        let pod = decode_instruction_data::<AmountCheckedData>(&packed).unwrap();
+        assert_eq!(pod.amount, amount.into());
+        assert_eq!(pod.decimals, decimals);
+    }
+
+    #[test]
+    fn test_initialize_account2_packing() {
+        let owner = Pubkey::new_from_array([2u8; 32]);
+        let check = TokenInstruction::InitializeAccount2 { owner };
         let packed = check.pack();
         let mut expect = vec![16u8];
         expect.extend_from_slice(&[2u8; 32]);
@@ -2162,6 +2353,14 @@ mod test {
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::InitializeAccount2);
+        let pod_owner = decode_instruction_data::<Pubkey>(&packed).unwrap();
+        assert_eq!(*pod_owner, owner);
+    }
+
+    #[test]
+    fn test_sync_native_packing() {
         let check = TokenInstruction::SyncNative;
         let packed = check.pack();
         let expect = vec![17u8];
@@ -2169,9 +2368,14 @@ mod test {
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::InitializeAccount3 {
-            owner: Pubkey::new_from_array([2u8; 32]),
-        };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::SyncNative);
+    }
+
+    #[test]
+    fn test_initialize_account3_packing() {
+        let owner = Pubkey::new_from_array([2u8; 32]);
+        let check = TokenInstruction::InitializeAccount3 { owner };
         let packed = check.pack();
         let mut expect = vec![18u8];
         expect.extend_from_slice(&[2u8; 32]);
@@ -2179,17 +2383,37 @@ mod test {
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::InitializeMultisig2 { m: 1 };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::InitializeAccount3);
+        let pod_owner = decode_instruction_data::<Pubkey>(&packed).unwrap();
+        assert_eq!(*pod_owner, owner);
+    }
+
+    #[test]
+    fn test_initialize_multisig2_packing() {
+        let m = 1;
+        let check = TokenInstruction::InitializeMultisig2 { m };
         let packed = check.pack();
         let expect = Vec::from([19u8, 1]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::InitializeMultisig2);
+        let pod = decode_instruction_data::<InitializeMultisigData>(&packed).unwrap();
+        assert_eq!(pod.m, m);
+    }
+
+    #[test]
+    fn test_initialize_mint2_packing() {
+        let decimals = 2;
+        let mint_authority = Pubkey::new_from_array([1u8; 32]);
+        let freeze_authority = COption::None;
         let check = TokenInstruction::InitializeMint2 {
-            decimals: 2,
-            mint_authority: Pubkey::new_from_array([1u8; 32]),
-            freeze_authority: COption::None,
+            decimals,
+            mint_authority,
+            freeze_authority,
         };
         let packed = check.pack();
         let mut expect = Vec::from([20u8, 2]);
@@ -2199,10 +2423,21 @@ mod test {
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::InitializeMint2);
+        let (pod, pod_freeze_authority) =
+            decode_instruction_data_with_coption_pubkey::<InitializeMintData>(&packed).unwrap();
+        assert_eq!(pod.decimals, decimals);
+        assert_eq!(pod.mint_authority, mint_authority);
+        assert_eq!(pod_freeze_authority, freeze_authority.into());
+
+        let decimals = 2;
+        let mint_authority = Pubkey::new_from_array([2u8; 32]);
+        let freeze_authority = COption::Some(Pubkey::new_from_array([3u8; 32]));
         let check = TokenInstruction::InitializeMint2 {
-            decimals: 2,
-            mint_authority: Pubkey::new_from_array([2u8; 32]),
-            freeze_authority: COption::Some(Pubkey::new_from_array([3u8; 32])),
+            decimals,
+            mint_authority,
+            freeze_authority,
         };
         let packed = check.pack();
         let mut expect = vec![20u8, 2];
@@ -2213,8 +2448,20 @@ mod test {
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::InitializeMint2);
+        let (pod, pod_freeze_authority) =
+            decode_instruction_data_with_coption_pubkey::<InitializeMintData>(&packed).unwrap();
+        assert_eq!(pod.decimals, decimals);
+        assert_eq!(pod.mint_authority, mint_authority);
+        assert_eq!(pod_freeze_authority, freeze_authority.into());
+    }
+
+    #[test]
+    fn test_get_account_data_size_packing() {
+        let extension_types = vec![];
         let check = TokenInstruction::GetAccountDataSize {
-            extension_types: vec![],
+            extension_types: extension_types.clone(),
         };
         let packed = check.pack();
         let expect = [21u8];
@@ -2222,11 +2469,21 @@ mod test {
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::GetAccountDataSize);
+        let pod_extension_types = packed[1..]
+            .chunks(std::mem::size_of::<ExtensionType>())
+            .map(ExtensionType::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(pod_extension_types, extension_types);
+
+        let extension_types = vec![
+            ExtensionType::TransferFeeConfig,
+            ExtensionType::TransferFeeAmount,
+        ];
         let check = TokenInstruction::GetAccountDataSize {
-            extension_types: vec![
-                ExtensionType::TransferFeeConfig,
-                ExtensionType::TransferFeeAmount,
-            ],
+            extension_types: extension_types.clone(),
         };
         let packed = check.pack();
         let expect = [21u8, 1, 0, 2, 0];
@@ -2234,23 +2491,52 @@ mod test {
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::AmountToUiAmount { amount: 42 };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::GetAccountDataSize);
+        let pod_extension_types = packed[1..]
+            .chunks(std::mem::size_of::<ExtensionType>())
+            .map(ExtensionType::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(pod_extension_types, extension_types);
+    }
+
+    #[test]
+    fn test_amount_to_ui_amount_packing() {
+        let amount = 42;
+        let check = TokenInstruction::AmountToUiAmount { amount };
         let packed = check.pack();
         let expect = vec![23u8, 42, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::UiAmountToAmount { ui_amount: "0.42" };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::AmountToUiAmount);
+        let data = decode_instruction_data::<AmountData>(&packed).unwrap();
+        assert_eq!(data.amount, amount.into());
+    }
+
+    #[test]
+    fn test_ui_amount_to_amount_packing() {
+        let ui_amount = "0.42";
+        let check = TokenInstruction::UiAmountToAmount { ui_amount };
         let packed = check.pack();
         let expect = vec![24u8, 48, 46, 52, 50];
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::InitializeMintCloseAuthority {
-            close_authority: COption::Some(Pubkey::new_from_array([10u8; 32])),
-        };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::UiAmountToAmount);
+        let pod_ui_amount = std::str::from_utf8(&packed[1..]).unwrap();
+        assert_eq!(pod_ui_amount, ui_amount);
+    }
+
+    #[test]
+    fn test_initialize_mint_close_authority_packing() {
+        let close_authority = COption::Some(Pubkey::new_from_array([10u8; 32]));
+        let check = TokenInstruction::InitializeMintCloseAuthority { close_authority };
         let packed = check.pack();
         let mut expect = vec![25u8, 1];
         expect.extend_from_slice(&[10u8; 32]);
@@ -2258,6 +2544,18 @@ mod test {
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(
+            instruction_type,
+            PodTokenInstruction::InitializeMintCloseAuthority
+        );
+        let (_, pod_close_authority) =
+            decode_instruction_data_with_coption_pubkey::<()>(&packed).unwrap();
+        assert_eq!(pod_close_authority, close_authority.into());
+    }
+
+    #[test]
+    fn test_create_native_mint_packing() {
         let check = TokenInstruction::CreateNativeMint;
         let packed = check.pack();
         let expect = vec![31u8];
@@ -2265,15 +2563,28 @@ mod test {
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
 
-        let check = TokenInstruction::InitializePermanentDelegate {
-            delegate: Pubkey::new_from_array([11u8; 32]),
-        };
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(instruction_type, PodTokenInstruction::CreateNativeMint);
+    }
+
+    #[test]
+    fn test_initialize_permanent_delegate_packing() {
+        let delegate = Pubkey::new_from_array([11u8; 32]);
+        let check = TokenInstruction::InitializePermanentDelegate { delegate };
         let packed = check.pack();
         let mut expect = vec![35u8];
         expect.extend_from_slice(&[11u8; 32]);
         assert_eq!(packed, expect);
         let unpacked = TokenInstruction::unpack(&expect).unwrap();
         assert_eq!(unpacked, check);
+
+        let instruction_type = decode_instruction_type::<PodTokenInstruction>(&packed).unwrap();
+        assert_eq!(
+            instruction_type,
+            PodTokenInstruction::InitializePermanentDelegate
+        );
+        let pod_delegate = decode_instruction_data::<Pubkey>(&packed).unwrap();
+        assert_eq!(*pod_delegate, delegate);
     }
 
     macro_rules! test_instruction {

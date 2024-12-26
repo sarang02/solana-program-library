@@ -1,34 +1,37 @@
 use {
-    crate::clap_app::{Error, MULTISIG_SIGNER_ARG},
+    crate::clap_app::{Error, COMPUTE_UNIT_LIMIT_ARG, COMPUTE_UNIT_PRICE_ARG, MULTISIG_SIGNER_ARG},
     clap::ArgMatches,
-    solana_clap_utils::{
-        input_parsers::{pubkey_of_signer, value_of},
+    solana_clap_v3_utils::{
+        input_parsers::pubkey_of_signer,
         input_validators::normalize_to_url_if_moniker,
-        keypair::{signer_from_path, signer_from_path_with_config, SignerFromPathConfig},
+        keypair::SignerFromPathConfig,
         nonce::{NONCE_ARG, NONCE_AUTHORITY_ARG},
-        offline::{BLOCKHASH_ARG, DUMP_TRANSACTION_MESSAGE, SIGN_ONLY_ARG},
+        offline::{BLOCKHASH_ARG, DUMP_TRANSACTION_MESSAGE, SIGNER_ARG, SIGN_ONLY_ARG},
     },
     solana_cli_output::OutputFormat,
     solana_client::nonblocking::rpc_client::RpcClient,
     solana_remote_wallet::remote_wallet::RemoteWalletManager,
     solana_sdk::{
         account::Account as RawAccount, commitment_config::CommitmentConfig, hash::Hash,
-        pubkey::Pubkey, signature::Signer,
+        pubkey::Pubkey, signature::Signer, signer::null_signer::NullSigner,
     },
-    spl_associated_token_account::*,
+    spl_associated_token_account_client::address::get_associated_token_address_with_program_id,
     spl_token_2022::{
         extension::StateWithExtensionsOwned,
         state::{Account, Mint},
     },
-    spl_token_client::client::{
-        ProgramClient, ProgramOfflineClient, ProgramRpcClient, ProgramRpcClientSendTransaction,
+    spl_token_client::{
+        client::{
+            ProgramClient, ProgramOfflineClient, ProgramRpcClient, ProgramRpcClientSendTransaction,
+        },
+        token::ComputeUnitLimit,
     },
-    std::{process::exit, rc::Rc, sync::Arc},
+    std::{process::exit, rc::Rc, str::FromStr, sync::Arc, time::Duration},
 };
 
 type SignersOf = Vec<(Arc<dyn Signer>, Pubkey)>;
 fn signers_of(
-    matches: &ArgMatches<'_>,
+    matches: &ArgMatches,
     name: &str,
     wallet_manager: &mut Option<Rc<RemoteWalletManager>>,
 ) -> Result<Option<SignersOf>, Box<dyn std::error::Error>> {
@@ -52,6 +55,9 @@ pub(crate) struct MintInfo {
     pub decimals: u8,
 }
 
+const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_CONFIRM_TX_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub struct Config<'a> {
     pub default_signer: Option<Arc<dyn Signer>>,
     pub rpc_client: Arc<RpcClient>,
@@ -67,11 +73,13 @@ pub struct Config<'a> {
     pub multisigner_pubkeys: Vec<&'a Pubkey>,
     pub program_id: Pubkey,
     pub restrict_to_program_id: bool,
+    pub compute_unit_price: Option<u64>,
+    pub compute_unit_limit: ComputeUnitLimit,
 }
 
 impl<'a> Config<'a> {
     pub async fn new(
-        matches: &ArgMatches<'_>,
+        matches: &ArgMatches,
         wallet_manager: &mut Option<Rc<RemoteWalletManager>>,
         bulk_signers: &mut Vec<Arc<dyn Signer>>,
         multisigner_ids: &'a mut Vec<Pubkey>,
@@ -92,13 +100,20 @@ impl<'a> Config<'a> {
                 .unwrap_or(&cli_config.json_rpc_url),
         );
         let websocket_url = solana_cli_config::Config::compute_websocket_url(&json_rpc_url);
-        let rpc_client = Arc::new(RpcClient::new_with_commitment(
+        let commitment_config = CommitmentConfig::from_str(&cli_config.commitment)
+            .unwrap_or_else(|_| CommitmentConfig::confirmed());
+        let rpc_client = Arc::new(RpcClient::new_with_timeouts_and_commitment(
             json_rpc_url,
-            CommitmentConfig::confirmed(),
+            DEFAULT_RPC_TIMEOUT,
+            commitment_config,
+            DEFAULT_CONFIRM_TX_TIMEOUT,
         ));
-        let sign_only = matches.is_present(SIGN_ONLY_ARG.name);
+        let sign_only = matches.try_contains_id(SIGN_ONLY_ARG.name).unwrap_or(false);
         let program_client: Arc<dyn ProgramClient<ProgramRpcClientSendTransaction>> = if sign_only {
-            let blockhash = value_of(matches, BLOCKHASH_ARG.name).unwrap_or_default();
+            let blockhash = matches
+                .get_one::<Hash>(BLOCKHASH_ARG.name)
+                .copied()
+                .unwrap_or_default();
             Arc::new(ProgramOfflineClient::new(
                 blockhash,
                 ProgramRpcClientSendTransaction,
@@ -122,7 +137,7 @@ impl<'a> Config<'a> {
     }
 
     fn extract_multisig_signers(
-        matches: &ArgMatches<'_>,
+        matches: &ArgMatches,
         wallet_manager: &mut Option<Rc<RemoteWalletManager>>,
         bulk_signers: &mut Vec<Arc<dyn Signer>>,
         multisigner_ids: &'a mut Vec<Pubkey>,
@@ -142,7 +157,7 @@ impl<'a> Config<'a> {
     }
 
     pub async fn new_with_clients_and_ws_url(
-        matches: &ArgMatches<'_>,
+        matches: &ArgMatches,
         wallet_manager: &mut Option<Rc<RemoteWalletManager>>,
         bulk_signers: &mut Vec<Arc<dyn Signer>>,
         multisigner_ids: &'a mut Vec<Pubkey>,
@@ -170,7 +185,7 @@ impl<'a> Config<'a> {
         let default_keypair = cli_config.keypair_path.clone();
 
         let default_signer: Option<Arc<dyn Signer>> = {
-            if let Some(owner_path) = matches.value_of("owner") {
+            if let Some(owner_path) = matches.try_get_one::<String>("owner").ok().flatten() {
                 signer_from_path_with_config(matches, owner_path, "owner", wallet_manager, &config)
                     .ok()
             } else {
@@ -222,11 +237,17 @@ impl<'a> Config<'a> {
                 OutputFormat::Display
             });
 
-        let nonce_account = pubkey_of_signer(matches, NONCE_ARG.name, wallet_manager)
-            .unwrap_or_else(|e| {
-                eprintln!("error: {}", e);
-                exit(1);
-            });
+        let nonce_account = match pubkey_of_signer(matches, NONCE_ARG.name, wallet_manager) {
+            Ok(account) => account,
+            Err(e) => {
+                if e.is::<clap::parser::MatchesError>() {
+                    None
+                } else {
+                    eprintln!("error: {}", e);
+                    exit(1);
+                }
+            }
+        };
         let nonce_authority = if nonce_account.is_some() {
             let (nonce_authority, _) = signer_from_path(
                 matches,
@@ -251,34 +272,82 @@ impl<'a> Config<'a> {
             None
         };
 
-        let sign_only = matches.is_present(SIGN_ONLY_ARG.name);
-        let dump_transaction_message = matches.is_present(DUMP_TRANSACTION_MESSAGE.name);
+        let sign_only = matches.try_contains_id(SIGN_ONLY_ARG.name).unwrap_or(false);
+        let dump_transaction_message = matches
+            .try_contains_id(DUMP_TRANSACTION_MESSAGE.name)
+            .unwrap_or(false);
+
+        let pubkey_from_matches = |name| {
+            matches
+                .try_get_one::<String>(name)
+                .ok()
+                .flatten()
+                .and_then(|pubkey| Pubkey::from_str(pubkey).ok())
+        };
 
         let default_program_id = spl_token::id();
-        let (program_id, restrict_to_program_id) =
-            if let Some(program_id) = value_of(matches, "program_id") {
-                (program_id, true)
-            } else if !sign_only {
-                if let Some(address) = value_of(matches, "token")
-                    .or_else(|| value_of(matches, "account"))
-                    .or_else(|| value_of(matches, "address"))
-                {
-                    (
-                        rpc_client
-                            .get_account(&address)
-                            .await
-                            .map(|account| account.owner)
-                            .unwrap_or(default_program_id),
-                        false,
-                    )
-                } else {
-                    (default_program_id, false)
-                }
+        let (program_id, restrict_to_program_id) = if matches.is_present("program_2022") {
+            (spl_token_2022::id(), true)
+        } else if let Some(program_id) = pubkey_from_matches("program_id") {
+            (program_id, true)
+        } else if !sign_only {
+            if let Some(address) = pubkey_from_matches("token")
+                .or_else(|| pubkey_from_matches("account"))
+                .or_else(|| pubkey_from_matches("address"))
+            {
+                (
+                    rpc_client
+                        .get_account(&address)
+                        .await
+                        .map(|account| account.owner)
+                        .unwrap_or(default_program_id),
+                    false,
+                )
             } else {
                 (default_program_id, false)
-            };
+            }
+        } else {
+            (default_program_id, false)
+        };
 
-        let nonce_blockhash = value_of(matches, BLOCKHASH_ARG.name);
+        if matches.try_contains_id(BLOCKHASH_ARG.name).unwrap_or(false)
+            && matches
+                .try_contains_id(COMPUTE_UNIT_PRICE_ARG.name)
+                .unwrap_or(false)
+            && !matches
+                .try_contains_id(COMPUTE_UNIT_LIMIT_ARG.name)
+                .unwrap_or(false)
+        {
+            clap::Error::with_description(
+                format!(
+                    "Need to set `{}` if `{}` and `--{}` are set",
+                    COMPUTE_UNIT_LIMIT_ARG.long, COMPUTE_UNIT_PRICE_ARG.long, BLOCKHASH_ARG.long,
+                ),
+                clap::ErrorKind::MissingRequiredArgument,
+            )
+            .exit();
+        }
+
+        let nonce_blockhash = matches
+            .try_get_one::<Hash>(BLOCKHASH_ARG.name)
+            .ok()
+            .flatten()
+            .copied();
+
+        let compute_unit_price = matches.get_one::<u64>(COMPUTE_UNIT_PRICE_ARG.name).copied();
+
+        let compute_unit_limit = matches
+            .get_one::<u32>(COMPUTE_UNIT_LIMIT_ARG.name)
+            .copied()
+            .map(ComputeUnitLimit::Static)
+            .unwrap_or_else(|| {
+                if nonce_blockhash.is_some() {
+                    ComputeUnitLimit::Default
+                } else {
+                    ComputeUnitLimit::Simulated
+                }
+            });
+
         Self {
             default_signer,
             rpc_client,
@@ -294,6 +363,8 @@ impl<'a> Config<'a> {
             multisigner_pubkeys,
             program_id,
             restrict_to_program_id,
+            compute_unit_price,
+            compute_unit_limit,
         }
     }
 
@@ -325,7 +396,7 @@ impl<'a> Config<'a> {
     // return the associated token address for the default address.
     pub(crate) async fn associated_token_address_or_override(
         &self,
-        arg_matches: &ArgMatches<'_>,
+        arg_matches: &ArgMatches,
         override_name: &str,
         wallet_manager: &mut Option<Rc<RemoteWalletManager>>,
     ) -> Result<Pubkey, Error> {
@@ -344,7 +415,7 @@ impl<'a> Config<'a> {
     // return the associated token address for the default address.
     pub(crate) async fn associated_token_address_for_token_or_override(
         &self,
-        arg_matches: &ArgMatches<'_>,
+        arg_matches: &ArgMatches,
         override_name: &str,
         wallet_manager: &mut Option<Rc<RemoteWalletManager>>,
         token: Option<Pubkey>,
@@ -376,7 +447,7 @@ impl<'a> Config<'a> {
     // address if there is one
     pub(crate) fn pubkey_or_default(
         &self,
-        arg_matches: &ArgMatches<'_>,
+        arg_matches: &ArgMatches,
         address_name: &str,
         wallet_manager: &mut Option<Rc<RemoteWalletManager>>,
     ) -> Result<Pubkey, Error> {
@@ -504,4 +575,45 @@ impl<'a> Config<'a> {
             Ok(mint_address.unwrap_or_default())
         }
     }
+}
+
+// In clap v2, `value_of` returns `None` if the argument id is not previously
+// specified in `Arg`. In contrast, in clap v3, `value_of` panics in this case.
+// Therefore, compared to the same function in solana-clap-utils,
+// `signer_from_path` in solana-clap-v3-utils errors early when `path` is a
+// valid pubkey, but `SIGNER_ARG.name` is not specified in the args.
+// This function behaves exactly as `signer_from_path` from solana-clap-utils by
+// catching this special case.
+fn signer_from_path(
+    matches: &ArgMatches,
+    path: &str,
+    keypair_name: &str,
+    wallet_manager: &mut Option<Rc<RemoteWalletManager>>,
+) -> Result<Box<dyn Signer>, Box<dyn std::error::Error>> {
+    let config = SignerFromPathConfig::default();
+    signer_from_path_with_config(matches, path, keypair_name, wallet_manager, &config)
+}
+
+fn signer_from_path_with_config(
+    matches: &ArgMatches,
+    path: &str,
+    keypair_name: &str,
+    wallet_manager: &mut Option<Rc<RemoteWalletManager>>,
+    config: &SignerFromPathConfig,
+) -> Result<Box<dyn Signer>, Box<dyn std::error::Error>> {
+    if let Ok(pubkey) = Pubkey::from_str(path) {
+        if matches.try_contains_id(SIGNER_ARG.name).is_err()
+            && (config.allow_null_signer || matches.try_contains_id(SIGN_ONLY_ARG.name)?)
+        {
+            return Ok(Box::new(NullSigner::new(&pubkey)));
+        }
+    }
+
+    solana_clap_v3_utils::keypair::signer_from_path_with_config(
+        matches,
+        path,
+        keypair_name,
+        wallet_manager,
+        config,
+    )
 }

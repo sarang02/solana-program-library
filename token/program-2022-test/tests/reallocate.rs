@@ -16,7 +16,6 @@ use {
     },
     spl_token_2022::{error::TokenError, extension::ExtensionType, state::Account},
     spl_token_client::token::{ExtensionInitializationParams, TokenError as TokenClientError},
-    std::convert::TryInto,
     test_case::test_case,
 };
 
@@ -162,8 +161,8 @@ async fn reallocate_without_current_extension_knowledge() {
     let mut context = TestContext::new().await;
     context
         .init_token_with_mint(vec![ExtensionInitializationParams::TransferFeeConfig {
-            transfer_fee_config_authority: COption::Some(Pubkey::new_unique()).try_into().unwrap(),
-            withdraw_withheld_authority: COption::Some(Pubkey::new_unique()).try_into().unwrap(),
+            transfer_fee_config_authority: COption::Some(Pubkey::new_unique()).into(),
+            withdraw_withheld_authority: COption::Some(Pubkey::new_unique()).into(),
             transfer_fee_basis_points: 250,
             maximum_fee: 10_000_000,
         }])
@@ -228,7 +227,7 @@ async fn reallocate_updates_native_rent_exemption(
 
     // transfer more lamports
     if transfer_lamports > 0 {
-        let mut context = context.lock().await;
+        let context = context.lock().await;
         let instructions = vec![system_instruction::transfer(
             &context.payer.pubkey(),
             &alice_account,
@@ -269,7 +268,7 @@ async fn reallocate_updates_native_rent_exemption(
         ExtensionType::try_calculate_account_len::<Account>(extensions).unwrap()
     );
     let expected_rent_exempt_reserve = {
-        let mut context = context.lock().await;
+        let context = context.lock().await;
         let rent = context.banks_client.get_rent().await.unwrap();
         rent.minimum_balance(account.data.len())
     };

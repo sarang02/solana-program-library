@@ -3,7 +3,8 @@
 use {
     crate::{error::TlvError, length::Length, variable_len_pack::VariableLenPack},
     bytemuck::Pod,
-    solana_program::{account_info::AccountInfo, program_error::ProgramError},
+    solana_account_info::AccountInfo,
+    solana_program_error::ProgramError,
     spl_discriminator::{ArrayDiscriminator, SplDiscriminate},
     spl_pod::bytemuck::{pod_from_bytes, pod_from_bytes_mut},
     std::{cmp::Ordering, mem::size_of},
@@ -375,8 +376,8 @@ impl<'data> TlvStateMut<'data> {
 
     /// Packs the default TLV data into the first open slot in the data buffer.
     /// Handles repetition based on the boolean arg provided:
-    /// * `true`:   If extension is already found in the buffer,
-    /// it returns an error.
+    /// * `true`:   If extension is already found in the buffer, it returns an
+    ///   error.
     /// * `false`:  Will add a new entry to the next open slot.
     pub fn init_value<V: SplDiscriminate + Pod + Default>(
         &mut self,
@@ -756,7 +757,7 @@ mod test {
         // correct due to the good discriminator length and zero length
         assert_eq!(
             get_discriminators_and_end_index(&[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).unwrap(),
-            (vec![ArrayDiscriminator::try_from(1).unwrap()], 12)
+            (vec![ArrayDiscriminator::from(1)], 12)
         );
         // correct since it's just uninitialized data
         assert_eq!(

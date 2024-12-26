@@ -1,5 +1,8 @@
 //! Instruction types
 
+// Remove the following `allow` when `Redelegate` is removed, required to avoid
+// warnings from uses of deprecated types during trait derivations.
+#![allow(deprecated)]
 #![allow(clippy::too_many_arguments)]
 
 use {
@@ -189,11 +192,14 @@ pub enum StakePoolInstruction {
     /// 11. `[]` Stake Config sysvar
     /// 12. `[]` System program
     /// 13. `[]` Stake program
-    ///  userdata: amount of lamports to increase on the given validator.
-    ///  The actual amount split into the transient stake account is:
-    ///  `lamports + stake_rent_exemption`
-    ///  The rent-exemption of the stake account is withdrawn back to the
-    /// reserve  after it is merged.
+    ///
+    /// userdata: amount of lamports to increase on the given validator.
+    ///
+    /// The actual amount split into the transient stake account is:
+    /// `lamports + stake_rent_exemption`.
+    ///
+    /// The rent-exemption of the stake account is withdrawn back to the
+    /// reserve after it is merged.
     IncreaseValidatorStake {
         /// amount of lamports to increase on the given validator
         lamports: u64,
@@ -317,7 +323,7 @@ pub enum StakePoolInstruction {
     ///   1. `[w]` Validator stake list storage account
     ///   2. `[]` Stake pool withdraw authority
     ///   3. `[w]` Validator or reserve stake account to split
-    ///   4. `[w]` Unitialized stake account to receive withdrawal
+    ///   4. `[w]` Uninitialized stake account to receive withdrawal
     ///   5. `[]` User account to set as a new withdraw authority
     ///   6. `[s]` User transfer authority, for pool token account
     ///   7. `[w]` User account with pool tokens to burn from
@@ -326,6 +332,7 @@ pub enum StakePoolInstruction {
     ///  10. `[]` Sysvar clock account (required)
     ///  11. `[]` Pool token program id
     ///  12. `[]` Stake program id,
+    ///
     ///  userdata: amount of pool tokens to withdraw
     WithdrawStake(u64),
 
@@ -460,11 +467,14 @@ pub enum StakePoolInstruction {
     /// 11. `[]` Stake Config sysvar
     /// 12. `[]` System program
     /// 13. `[]` Stake program
-    ///  userdata: amount of lamports to increase on the given validator.
-    ///  The actual amount split into the transient stake account is:
-    ///  `lamports + stake_rent_exemption`
-    ///  The rent-exemption of the stake account is withdrawn back to the
-    /// reserve  after it is merged.
+    ///
+    /// userdata: amount of lamports to increase on the given validator.
+    ///
+    /// The actual amount split into the transient stake account is:
+    /// `lamports + stake_rent_exemption`.
+    ///
+    /// The rent-exemption of the stake account is withdrawn back to the
+    /// reserve after it is merged.
     IncreaseAdditionalValidatorStake {
         /// amount of lamports to increase on the given validator
         lamports: u64,
@@ -599,6 +609,10 @@ pub enum StakePoolInstruction {
     /// 13. `[]` Stake Config sysvar
     /// 14. `[]` System program
     /// 15. `[]` Stake program
+    #[deprecated(
+        since = "2.0.0",
+        note = "The stake redelegate instruction used in this will not be enabled."
+    )]
     Redelegate {
         /// Amount of lamports to redelegate
         #[allow(dead_code)] // but it's not
@@ -658,7 +672,7 @@ pub enum StakePoolInstruction {
     ///   1. `[w]` Validator stake list storage account
     ///   2. `[]` Stake pool withdraw authority
     ///   3. `[w]` Validator or reserve stake account to split
-    ///   4. `[w]` Unitialized stake account to receive withdrawal
+    ///   4. `[w]` Uninitialized stake account to receive withdrawal
     ///   5. `[]` User account to set as a new withdraw authority
     ///   6. `[s]` User transfer authority, for pool token account
     ///   7. `[w]` User account with pool tokens to burn from
@@ -667,6 +681,7 @@ pub enum StakePoolInstruction {
     ///  10. `[]` Sysvar clock account (required)
     ///  11. `[]` Pool token program id
     ///  12. `[]` Stake program id,
+    ///
     ///  userdata: amount of pool tokens to withdraw
     WithdrawStakeWithSlippage {
         /// Pool tokens to burn in exchange for lamports
@@ -1051,6 +1066,10 @@ pub fn increase_additional_validator_stake(
 
 /// Creates `Redelegate` instruction (rebalance from one validator account to
 /// another)
+#[deprecated(
+    since = "2.0.0",
+    note = "The stake redelegate instruction used in this will not be enabled."
+)]
 pub fn redelegate(
     program_id: &Pubkey,
     stake_pool: &Pubkey,
@@ -1310,6 +1329,62 @@ pub fn decrease_validator_stake_with_vote(
         lamports,
         transient_stake_seed,
     )
+}
+
+/// Create a `IncreaseAdditionalValidatorStake` instruction given an existing
+/// stake pool, valiator list and vote account
+pub fn increase_additional_validator_stake_with_list(
+    program_id: &Pubkey,
+    stake_pool: &StakePool,
+    validator_list: &ValidatorList,
+    stake_pool_address: &Pubkey,
+    vote_account_address: &Pubkey,
+    lamports: u64,
+    ephemeral_stake_seed: u64,
+) -> Result<Instruction, ProgramError> {
+    let validator_info = validator_list
+        .find(vote_account_address)
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    let transient_stake_seed = u64::from(validator_info.transient_seed_suffix);
+    let validator_stake_seed = NonZeroU32::new(validator_info.validator_seed_suffix.into());
+    Ok(increase_additional_validator_stake_with_vote(
+        program_id,
+        stake_pool,
+        stake_pool_address,
+        vote_account_address,
+        lamports,
+        validator_stake_seed,
+        transient_stake_seed,
+        ephemeral_stake_seed,
+    ))
+}
+
+/// Create a `DecreaseAdditionalValidatorStake` instruction given an existing
+/// stake pool, valiator list and vote account
+pub fn decrease_additional_validator_stake_with_list(
+    program_id: &Pubkey,
+    stake_pool: &StakePool,
+    validator_list: &ValidatorList,
+    stake_pool_address: &Pubkey,
+    vote_account_address: &Pubkey,
+    lamports: u64,
+    ephemeral_stake_seed: u64,
+) -> Result<Instruction, ProgramError> {
+    let validator_info = validator_list
+        .find(vote_account_address)
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    let transient_stake_seed = u64::from(validator_info.transient_seed_suffix);
+    let validator_stake_seed = NonZeroU32::new(validator_info.validator_seed_suffix.into());
+    Ok(decrease_additional_validator_stake_with_vote(
+        program_id,
+        stake_pool,
+        stake_pool_address,
+        vote_account_address,
+        lamports,
+        validator_stake_seed,
+        transient_stake_seed,
+        ephemeral_stake_seed,
+    ))
 }
 
 /// Create a `DecreaseAdditionalValidatorStake` instruction given an existing

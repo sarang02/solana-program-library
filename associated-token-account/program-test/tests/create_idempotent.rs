@@ -17,11 +17,11 @@ use {
     },
     spl_associated_token_account::{
         error::AssociatedTokenAccountError,
-        get_associated_token_address_with_program_id,
         instruction::{
             create_associated_token_account, create_associated_token_account_idempotent,
         },
     },
+    spl_associated_token_account_client::address::get_associated_token_address_with_program_id,
     spl_token_2022::{
         extension::ExtensionType,
         instruction::initialize_account,
@@ -153,7 +153,7 @@ async fn fail_account_exists_with_wrong_owner() {
     Account::pack(token_account, &mut associated_token_account.data).unwrap();
     let mut pt = program_test_2022(token_mint_address, true);
     pt.add_account(associated_token_address, associated_token_account);
-    let (mut banks_client, payer, recent_blockhash) = pt.start().await;
+    let (banks_client, payer, recent_blockhash) = pt.start().await;
 
     // fail creating token account if non existent
     let instruction = create_associated_token_account_idempotent(
@@ -185,7 +185,7 @@ async fn fail_account_exists_with_wrong_owner() {
 #[tokio::test]
 async fn fail_non_ata() {
     let token_mint_address = Pubkey::new_unique();
-    let (mut banks_client, payer, recent_blockhash) =
+    let (banks_client, payer, recent_blockhash) =
         program_test_2022(token_mint_address, true).start().await;
 
     let rent = banks_client.get_rent().await.unwrap();

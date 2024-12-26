@@ -1,14 +1,15 @@
-#![allow(deprecated)]
-
 pub mod meta;
 
 use {
     crate::meta::parse_transfer_hook_account_arg,
-    clap::{crate_description, crate_name, crate_version, Arg, Command},
+    clap::{crate_description, crate_name, crate_version, Arg, ArgAction, Command},
     solana_clap_v3_utils::{
-        input_parsers::{parse_url_or_moniker, pubkey_of_signer},
-        input_validators::{is_valid_pubkey, is_valid_signer, normalize_to_url_if_moniker},
-        keypair::DefaultSigner,
+        input_parsers::{
+            parse_url_or_moniker,
+            signer::{SignerSource, SignerSourceParserBuilder},
+        },
+        input_validators::normalize_to_url_if_moniker,
+        keypair::signer_from_path,
     },
     solana_client::nonblocking::rpc_client::RpcClient,
     solana_remote_wallet::remote_wallet::RemoteWalletManager,
@@ -27,10 +28,6 @@ use {
     },
     std::{process::exit, rc::Rc},
 };
-
-fn clap_is_valid_pubkey(arg: &str) -> Result<(), String> {
-    is_valid_pubkey(arg)
-}
 
 // Helper function to calculate the required lamports for rent
 async fn calculate_rent_lamports(
@@ -209,7 +206,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Arg::new("fee_payer")
                 .long("fee-payer")
                 .value_name("KEYPAIR")
-                .validator(|s| is_valid_signer(s))
+                .value_parser(SignerSourceParserBuilder::default().allow_all().build())
                 .takes_value(true)
                 .global(true)
                 .help("Filepath or URL to a keypair to pay transaction fee [default: client keypair]"),
@@ -236,8 +233,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Command::new("create-extra-metas")
                 .about("Create the extra account metas account for a transfer hook program")
                 .arg(
-                    Arg::with_name("program_id")
-                        .validator(clap_is_valid_pubkey)
+                    Arg::new("program_id")
+                        .value_parser(SignerSourceParserBuilder::default().allow_pubkey().allow_file_path().build())
                         .value_name("TRANSFER_HOOK_PROGRAM")
                         .takes_value(true)
                         .index(1)
@@ -245,8 +242,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .help("The transfer hook program id"),
                 )
                 .arg(
-                    Arg::with_name("token")
-                        .validator(clap_is_valid_pubkey)
+                    Arg::new("token")
+                        .value_parser(SignerSourceParserBuilder::default().allow_pubkey().allow_file_path().build())
                         .value_name("TOKEN_MINT_ADDRESS")
                         .takes_value(true)
                         .index(2)
@@ -254,19 +251,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .help("The token mint address for the transfer hook"),
                 )
                 .arg(
-                    Arg::with_name("transfer_hook_accounts")
+                    Arg::new("transfer_hook_accounts")
                         .value_parser(parse_transfer_hook_account_arg)
                         .value_name("TRANSFER_HOOK_ACCOUNTS")
                         .takes_value(true)
-                        .multiple(true)
+                        .action(ArgAction::Append)
                         .min_values(0)
                         .index(3)
                         .help(r#"Additional account(s) required for a transfer hook and their respective configurations, whether they are a fixed address or PDA.
 
 Additional accounts with known fixed addresses can be passed at the command line in the format "<PUBKEY>:<ROLE>". The role must be "readonly", "writable". "readonlySigner", or "writableSigner".
 
-Additional acounts requiring seed configurations can be defined in a configuration file using either JSON or YAML. The format is as follows:
-                            
+Additional accounts requiring seed configurations can be defined in a configuration file using either JSON or YAML. The format is as follows:
+
 ```json
 {
     "extraMetas": [
@@ -310,7 +307,7 @@ extraMetas:
                     Arg::new("mint_authority")
                         .long("mint-authority")
                         .value_name("KEYPAIR")
-                        .validator(|s| is_valid_signer(s))
+                        .value_parser(SignerSourceParserBuilder::default().allow_all().build())
                         .takes_value(true)
                         .global(true)
                         .help("Filepath or URL to mint-authority keypair [default: client keypair]"),
@@ -320,8 +317,8 @@ extraMetas:
             Command::new("update-extra-metas")
                 .about("Update the extra account metas account for a transfer hook program")
                 .arg(
-                    Arg::with_name("program_id")
-                        .validator(clap_is_valid_pubkey)
+                    Arg::new("program_id")
+                        .value_parser(SignerSourceParserBuilder::default().allow_pubkey().allow_file_path().build())
                         .value_name("TRANSFER_HOOK_PROGRAM")
                         .takes_value(true)
                         .index(1)
@@ -329,8 +326,8 @@ extraMetas:
                         .help("The transfer hook program id"),
                 )
                 .arg(
-                    Arg::with_name("token")
-                        .validator(clap_is_valid_pubkey)
+                    Arg::new("token")
+                        .value_parser(SignerSourceParserBuilder::default().allow_pubkey().allow_file_path().build())
                         .value_name("TOKEN_MINT_ADDRESS")
                         .takes_value(true)
                         .index(2)
@@ -338,19 +335,19 @@ extraMetas:
                         .help("The token mint address for the transfer hook"),
                 )
                 .arg(
-                    Arg::with_name("transfer_hook_accounts")
+                    Arg::new("transfer_hook_accounts")
                         .value_parser(parse_transfer_hook_account_arg)
                         .value_name("TRANSFER_HOOK_ACCOUNTS")
                         .takes_value(true)
-                        .multiple(true)
+                        .action(ArgAction::Append)
                         .min_values(0)
                         .index(3)
                         .help(r#"Additional account(s) required for a transfer hook and their respective configurations, whether they are a fixed address or PDA.
 
 Additional accounts with known fixed addresses can be passed at the command line in the format "<PUBKEY>:<ROLE>". The role must be "readonly", "writable". "readonlySigner", or "writableSigner".
 
-Additional acounts requiring seed configurations can be defined in a configuration file using either JSON or YAML. The format is as follows:
-                            
+Additional accounts requiring seed configurations can be defined in a configuration file using either JSON or YAML. The format is as follows:
+
 ```json
 {
     "extraMetas": [
@@ -394,7 +391,7 @@ extraMetas:
                     Arg::new("mint_authority")
                         .long("mint-authority")
                         .value_name("KEYPAIR")
-                        .validator(|s| is_valid_signer(s))
+                        .value_parser(SignerSourceParserBuilder::default().allow_all().build())
                         .takes_value(true)
                         .global(true)
                         .help("Filepath or URL to mint-authority keypair [default: client keypair]"),
@@ -404,37 +401,37 @@ extraMetas:
     let (command, matches) = app_matches.subcommand().unwrap();
     let mut wallet_manager: Option<Rc<RemoteWalletManager>> = None;
 
-    let cli_config = if let Some(config_file) = matches.value_of("config_file") {
+    let cli_config = if let Some(config_file) = matches.get_one::<String>("config_file") {
         solana_cli_config::Config::load(config_file).unwrap_or_default()
     } else {
         solana_cli_config::Config::default()
     };
 
     let config = {
-        let default_signer = DefaultSigner::new(
-            "fee_payer",
-            matches
-                .value_of("fee_payer")
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| cli_config.keypair_path.clone()),
-        );
+        let default_signer = if let Some((signer, _)) =
+            SignerSource::try_get_signer(matches, "fee_payer", &mut wallet_manager)?
+        {
+            signer
+        } else {
+            signer_from_path(
+                matches,
+                &cli_config.keypair_path,
+                "fee_payer",
+                &mut wallet_manager,
+            )?
+        };
 
         let json_rpc_url = normalize_to_url_if_moniker(
             matches
-                .value_of("json_rpc_url")
+                .get_one::<String>("json_rpc_url")
                 .unwrap_or(&cli_config.json_rpc_url),
         );
 
         Config {
             commitment_config: CommitmentConfig::confirmed(),
-            default_signer: default_signer
-                .signer_from_path(matches, &mut wallet_manager)
-                .unwrap_or_else(|err| {
-                    eprintln!("error: {err}");
-                    exit(1);
-                }),
+            default_signer,
             json_rpc_url,
-            verbose: matches.is_present("verbose"),
+            verbose: matches.try_contains_id("verbose")?,
         }
     };
     solana_logger::setup_with_default("solana=info");
@@ -447,30 +444,30 @@ extraMetas:
 
     match (command, matches) {
         ("create-extra-metas", arg_matches) => {
-            let program_id = pubkey_of_signer(arg_matches, "program_id", &mut wallet_manager)
-                .unwrap()
-                .unwrap();
-            let token = pubkey_of_signer(arg_matches, "token", &mut wallet_manager)
-                .unwrap()
-                .unwrap();
+            let program_id =
+                SignerSource::try_get_pubkey(arg_matches, "program_id", &mut wallet_manager)?
+                    .unwrap();
+            let token =
+                SignerSource::try_get_pubkey(arg_matches, "token", &mut wallet_manager)?.unwrap();
+
             let transfer_hook_accounts = arg_matches
                 .get_many::<Vec<ExtraAccountMeta>>("transfer_hook_accounts")
                 .unwrap_or_default()
                 .flatten()
                 .cloned()
                 .collect();
-            let mint_authority = DefaultSigner::new(
-                "mint_authority",
-                matches
-                    .value_of("mint_authority")
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| cli_config.keypair_path.clone()),
-            )
-            .signer_from_path(matches, &mut wallet_manager)
-            .unwrap_or_else(|err| {
-                eprintln!("error: {err}");
-                exit(1);
-            });
+            let mint_authority = if let Some((signer, _)) =
+                SignerSource::try_get_signer(matches, "mint_authority", &mut wallet_manager)?
+            {
+                signer
+            } else {
+                signer_from_path(
+                    matches,
+                    &cli_config.keypair_path,
+                    "mint_authority",
+                    &mut wallet_manager,
+                )?
+            };
             let signature = process_create_extra_account_metas(
                 &rpc_client,
                 &program_id,
@@ -487,30 +484,30 @@ extraMetas:
             println!("Signature: {signature}");
         }
         ("update-extra-metas", arg_matches) => {
-            let program_id = pubkey_of_signer(arg_matches, "program_id", &mut wallet_manager)
-                .unwrap()
-                .unwrap();
-            let token = pubkey_of_signer(arg_matches, "token", &mut wallet_manager)
-                .unwrap()
-                .unwrap();
+            let program_id =
+                SignerSource::try_get_pubkey(arg_matches, "program_id", &mut wallet_manager)?
+                    .unwrap();
+            let token =
+                SignerSource::try_get_pubkey(arg_matches, "token", &mut wallet_manager)?.unwrap();
+
             let transfer_hook_accounts = arg_matches
                 .get_many::<Vec<ExtraAccountMeta>>("transfer_hook_accounts")
                 .unwrap_or_default()
                 .flatten()
                 .cloned()
                 .collect();
-            let mint_authority = DefaultSigner::new(
-                "mint_authority",
-                matches
-                    .value_of("mint_authority")
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| cli_config.keypair_path.clone()),
-            )
-            .signer_from_path(matches, &mut wallet_manager)
-            .unwrap_or_else(|err| {
-                eprintln!("error: {err}");
-                exit(1);
-            });
+            let mint_authority = if let Some((signer, _)) =
+                SignerSource::try_get_signer(matches, "mint_authority", &mut wallet_manager)?
+            {
+                signer
+            } else {
+                signer_from_path(
+                    matches,
+                    &cli_config.keypair_path,
+                    "mint_authority",
+                    &mut wallet_manager,
+                )?
+            };
             let signature = process_update_extra_account_metas(
                 &rpc_client,
                 &program_id,
@@ -536,19 +533,27 @@ extraMetas:
 mod test {
     use {
         super::*,
-        solana_sdk::{bpf_loader_upgradeable, instruction::AccountMeta, signer::keypair::Keypair},
+        solana_sdk::{
+            account::Account, bpf_loader_upgradeable, instruction::AccountMeta,
+            program_option::COption, signer::keypair::Keypair,
+        },
         solana_test_validator::{TestValidator, TestValidatorGenesis, UpgradeableProgramInfo},
+        spl_token_2022::{
+            extension::{ExtensionType, StateWithExtensionsMut},
+            state::Mint,
+        },
         spl_token_client::{
-            client::{
-                ProgramClient, ProgramRpcClient, ProgramRpcClientSendTransaction, SendTransaction,
-                SimulateTransaction,
-            },
+            client::{ProgramRpcClient, ProgramRpcClientSendTransaction},
             token::Token,
         },
         std::{path::PathBuf, sync::Arc},
     };
 
-    async fn new_validator_for_test(program_id: Pubkey) -> (TestValidator, Keypair) {
+    async fn new_validator_for_test(
+        program_id: Pubkey,
+        mint_authority: &Pubkey,
+        decimals: u8,
+    ) -> (TestValidator, Keypair) {
         solana_logger::setup();
         let mut test_validator_genesis = TestValidatorGenesis::default();
         test_validator_genesis.add_upgradeable_programs_with_path(&[UpgradeableProgramInfo {
@@ -557,36 +562,41 @@ mod test {
             program_path: PathBuf::from("../../../target/deploy/spl_transfer_hook_example.so"),
             upgrade_authority: Pubkey::new_unique(),
         }]);
-        test_validator_genesis.start_async().await
-    }
 
-    async fn setup_mint<T: SendTransaction + SimulateTransaction>(
-        program_id: &Pubkey,
-        mint_authority: &Pubkey,
-        decimals: u8,
-        payer: Arc<dyn Signer>,
-        client: Arc<dyn ProgramClient<T>>,
-    ) -> Token<T> {
-        let mint_account = Keypair::new();
-        let token = Token::new(
-            client,
-            program_id,
-            &mint_account.pubkey(),
-            Some(decimals),
-            payer,
+        let mint_size = ExtensionType::try_calculate_account_len::<Mint>(&[]).unwrap();
+        let mut mint_data = vec![0; mint_size];
+        let mut state =
+            StateWithExtensionsMut::<Mint>::unpack_uninitialized(&mut mint_data).unwrap();
+        let token_amount = 1_000_000_000_000;
+        state.base = Mint {
+            mint_authority: COption::Some(*mint_authority),
+            supply: token_amount,
+            decimals,
+            is_initialized: true,
+            freeze_authority: COption::None,
+        };
+        state.pack_base();
+        test_validator_genesis.add_account(
+            spl_transfer_hook_example::mint::id(),
+            Account {
+                lamports: 1_000_000_000,
+                data: mint_data,
+                owner: spl_token_2022::id(),
+                ..Account::default()
+            }
+            .into(),
         );
-        token
-            .create_mint(mint_authority, None, vec![], &[&mint_account])
-            .await
-            .unwrap();
-        token
+        test_validator_genesis.start_async().await
     }
 
     #[tokio::test]
     async fn test_create() {
         let program_id = Pubkey::new_unique();
 
-        let (test_validator, payer) = new_validator_for_test(program_id).await;
+        let decimals = 2;
+        let mint_authority = Keypair::new();
+        let (test_validator, payer) =
+            new_validator_for_test(program_id, &mint_authority.pubkey(), decimals).await;
         let payer: Arc<dyn Signer> = Arc::new(payer);
         let rpc_client = Arc::new(test_validator.get_async_rpc_client());
         let client = Arc::new(ProgramRpcClient::new(
@@ -594,20 +604,16 @@ mod test {
             ProgramRpcClientSendTransaction,
         ));
 
-        let mint_authority = Keypair::new();
-        let decimals = 2;
-
-        let token = setup_mint(
-            &spl_token_2022::id(),
-            &mint_authority.pubkey(),
-            decimals,
-            payer.clone(),
+        let token = Token::new(
             client.clone(),
-        )
-        .await;
+            &spl_token_2022::id(),
+            &spl_transfer_hook_example::mint::id(),
+            Some(decimals),
+            payer.clone(),
+        );
 
         let required_address = Pubkey::new_unique();
-        let accounts = vec![AccountMeta::new_readonly(required_address, false)];
+        let accounts = [AccountMeta::new_readonly(required_address, false)];
         process_create_extra_account_metas(
             &rpc_client,
             &program_id,

@@ -3,9 +3,10 @@
 use {
     crate::error::TokenGroupError,
     bytemuck::{Pod, Zeroable},
-    solana_program::{program_error::ProgramError, pubkey::Pubkey},
+    solana_program_error::ProgramError,
+    solana_pubkey::Pubkey,
     spl_discriminator::SplDiscriminate,
-    spl_pod::{error::PodSliceError, optional_keys::OptionalNonZeroPubkey, primitives::PodU32},
+    spl_pod::{error::PodSliceError, optional_keys::OptionalNonZeroPubkey, primitives::PodU64},
 };
 
 /// Data struct for a `TokenGroup`
@@ -19,26 +20,26 @@ pub struct TokenGroup {
     /// belongs to a particular mint
     pub mint: Pubkey,
     /// The current number of group members
-    pub size: PodU32,
+    pub size: PodU64,
     /// The maximum number of group members
-    pub max_size: PodU32,
+    pub max_size: PodU64,
 }
 
 impl TokenGroup {
     /// Creates a new `TokenGroup` state
-    pub fn new(mint: &Pubkey, update_authority: OptionalNonZeroPubkey, max_size: u32) -> Self {
+    pub fn new(mint: &Pubkey, update_authority: OptionalNonZeroPubkey, max_size: u64) -> Self {
         Self {
             mint: *mint,
             update_authority,
-            size: PodU32::default(), // [0, 0, 0, 0]
+            size: PodU64::default(), // [0, 0, 0, 0, 0, 0, 0, 0]
             max_size: max_size.into(),
         }
     }
 
     /// Updates the max size for a group
-    pub fn update_max_size(&mut self, new_max_size: u32) -> Result<(), ProgramError> {
+    pub fn update_max_size(&mut self, new_max_size: u64) -> Result<(), ProgramError> {
         // The new max size cannot be less than the current size
-        if new_max_size < u32::from(self.size) {
+        if new_max_size < u64::from(self.size) {
             return Err(TokenGroupError::SizeExceedsNewMaxSize.into());
         }
         self.max_size = new_max_size.into();
@@ -46,12 +47,12 @@ impl TokenGroup {
     }
 
     /// Increment the size for a group, returning the new size
-    pub fn increment_size(&mut self) -> Result<u32, ProgramError> {
+    pub fn increment_size(&mut self) -> Result<u64, ProgramError> {
         // The new size cannot be greater than the max size
-        let new_size = u32::from(self.size)
+        let new_size = u64::from(self.size)
             .checked_add(1)
             .ok_or::<ProgramError>(PodSliceError::CalculationFailure.into())?;
-        if new_size > u32::from(self.max_size) {
+        if new_size > u64::from(self.max_size) {
             return Err(TokenGroupError::SizeExceedsMaxSize.into());
         }
         self.size = new_size.into();
@@ -70,11 +71,11 @@ pub struct TokenGroupMember {
     /// The pubkey of the `TokenGroup`
     pub group: Pubkey,
     /// The member number
-    pub member_number: PodU32,
+    pub member_number: PodU64,
 }
 impl TokenGroupMember {
     /// Creates a new `TokenGroupMember` state
-    pub fn new(mint: &Pubkey, group: &Pubkey, member_number: u32) -> Self {
+    pub fn new(mint: &Pubkey, group: &Pubkey, member_number: u64) -> Self {
         Self {
             mint: *mint,
             group: *group,
@@ -88,7 +89,7 @@ mod tests {
     use {
         super::*,
         crate::NAMESPACE,
-        solana_program::hash,
+        solana_sha256_hasher::hashv,
         spl_discriminator::ArrayDiscriminator,
         spl_type_length_value::state::{TlvState, TlvStateBorrowed, TlvStateMut},
         std::mem::size_of,
@@ -96,12 +97,12 @@ mod tests {
 
     #[test]
     fn discriminators() {
-        let preimage = hash::hashv(&[format!("{NAMESPACE}:group").as_bytes()]);
+        let preimage = hashv(&[format!("{NAMESPACE}:group").as_bytes()]);
         let discriminator =
             ArrayDiscriminator::try_from(&preimage.as_ref()[..ArrayDiscriminator::LENGTH]).unwrap();
         assert_eq!(TokenGroup::SPL_DISCRIMINATOR, discriminator);
 
-        let preimage = hash::hashv(&[format!("{NAMESPACE}:member").as_bytes()]);
+        let preimage = hashv(&[format!("{NAMESPACE}:member").as_bytes()]);
         let discriminator =
             ArrayDiscriminator::try_from(&preimage.as_ref()[..ArrayDiscriminator::LENGTH]).unwrap();
         assert_eq!(TokenGroupMember::SPL_DISCRIMINATOR, discriminator);
@@ -156,7 +157,7 @@ mod tests {
 
         let new_max_size = 30;
         group.update_max_size(new_max_size).unwrap();
-        assert_eq!(u32::from(group.max_size), new_max_size);
+        assert_eq!(u64::from(group.max_size), new_max_size);
 
         // Change the current size to 30
         group.size = 30.into();
@@ -170,7 +171,7 @@ mod tests {
 
         let new_max_size = 30;
         group.update_max_size(new_max_size).unwrap();
-        assert_eq!(u32::from(group.max_size), new_max_size);
+        assert_eq!(u64::from(group.max_size), new_max_size);
     }
 
     #[test]
@@ -183,7 +184,7 @@ mod tests {
         };
 
         group.increment_size().unwrap();
-        assert_eq!(u32::from(group.size), 1);
+        assert_eq!(u64::from(group.size), 1);
 
         // Try to increase the current size to 2, which is greater than the max size
         assert_eq!(

@@ -98,7 +98,7 @@ mod tests {
     }
 
     fn build_discriminator(hash_input: &str) -> ArrayDiscriminator {
-        let preimage = solana_program::hash::hashv(&[hash_input.as_bytes()]);
+        let preimage = solana_sha256_hasher::hashv(&[hash_input.as_bytes()]);
         let mut bytes = [0u8; 8];
         bytes.copy_from_slice(&preimage.to_bytes()[..8]);
         ArrayDiscriminator::new(bytes)
@@ -130,15 +130,15 @@ mod tests {
 
 #[cfg(all(test, feature = "borsh"))]
 mod borsh_test {
-    use super::*;
+    use {super::*, borsh::BorshDeserialize};
 
     #[test]
     fn borsh_test() {
         let my_discrim = ArrayDiscriminator::new_with_hash_input("my_discrim");
         let mut buffer = [0u8; 8];
-        my_discrim.serialize(&mut buffer[..]).unwrap();
+        borsh::to_writer(&mut buffer[..], &my_discrim).unwrap();
         let my_discrim_again = ArrayDiscriminator::try_from_slice(&buffer).unwrap();
         assert_eq!(my_discrim, my_discrim_again);
-        assert_eq!(buf, my_discrim.into());
+        assert_eq!(buffer, <[u8; 8]>::from(my_discrim));
     }
 }

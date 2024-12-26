@@ -10,28 +10,35 @@ import {
     getFieldConfig,
 } from '../src';
 import {
+    addDecoderSizePrefix,
+    fixDecoderSize,
     getBooleanDecoder,
     getBytesDecoder,
     getDataEnumCodec,
     getOptionDecoder,
-    getStringDecoder,
+    getUtf8Decoder,
+    getU32Decoder,
     getU64Decoder,
     getStructDecoder,
     some,
 } from '@solana/codecs';
 import { splDiscriminate } from '@solana/spl-type-length-value';
-import type { Decoder, Option } from '@solana/codecs';
+import type { Decoder, Option, VariableSizeDecoder } from '@solana/codecs';
 import { PublicKey, type TransactionInstruction } from '@solana/web3.js';
 
 function checkPackUnpack<T extends object>(
     instruction: TransactionInstruction,
     discriminator: Uint8Array,
     decoder: Decoder<T>,
-    values: T
+    values: T,
 ) {
     expect(instruction.data.subarray(0, 8)).to.deep.equal(discriminator);
     const unpacked = decoder.decode(instruction.data.subarray(8));
     expect(unpacked).to.deep.equal(values);
+}
+
+function getStringDecoder(): VariableSizeDecoder<string> {
+    return addDecoderSizePrefix(getUtf8Decoder(), getU32Decoder());
 }
 
 describe('Token Metadata Instructions', () => {
@@ -41,7 +48,7 @@ describe('Token Metadata Instructions', () => {
     const mint = new PublicKey('55555555555555555555555555555555555555555555');
     const mintAuthority = new PublicKey('66666666666666666666666666666666666666666666');
 
-    it('Can create Initialize Instruction', () => {
+    it('Can create Initialize Instruction', async () => {
         const name = 'My test token';
         const symbol = 'TEST';
         const uri = 'http://test.test';
@@ -56,17 +63,17 @@ describe('Token Metadata Instructions', () => {
                 symbol,
                 uri,
             }),
-            splDiscriminate('spl_token_metadata_interface:initialize_account'),
+            await splDiscriminate('spl_token_metadata_interface:initialize_account'),
             getStructDecoder([
                 ['name', getStringDecoder()],
                 ['symbol', getStringDecoder()],
                 ['uri', getStringDecoder()],
             ]),
-            { name, symbol, uri }
+            { name, symbol, uri },
         );
     });
 
-    it('Can create Update Field Instruction', () => {
+    it('Can create Update Field Instruction', async () => {
         const field = 'MyTestField';
         const value = 'http://test.uri';
         checkPackUnpack(
@@ -77,16 +84,16 @@ describe('Token Metadata Instructions', () => {
                 field,
                 value,
             }),
-            splDiscriminate('spl_token_metadata_interface:updating_field'),
+            await splDiscriminate('spl_token_metadata_interface:updating_field'),
             getStructDecoder([
                 ['key', getDataEnumCodec(getFieldCodec())],
                 ['value', getStringDecoder()],
             ]),
-            { key: getFieldConfig(field), value }
+            { key: getFieldConfig(field), value },
         );
     });
 
-    it('Can create Update Field Instruction with Field Enum', () => {
+    it('Can create Update Field Instruction with Field Enum', async () => {
         const field = 'Name';
         const value = 'http://test.uri';
         checkPackUnpack(
@@ -97,16 +104,16 @@ describe('Token Metadata Instructions', () => {
                 field,
                 value,
             }),
-            splDiscriminate('spl_token_metadata_interface:updating_field'),
+            await splDiscriminate('spl_token_metadata_interface:updating_field'),
             getStructDecoder([
                 ['key', getDataEnumCodec(getFieldCodec())],
                 ['value', getStringDecoder()],
             ]),
-            { key: getFieldConfig(field), value }
+            { key: getFieldConfig(field), value },
         );
     });
 
-    it('Can create Remove Key Instruction', () => {
+    it('Can create Remove Key Instruction', async () => {
         checkPackUnpack(
             createRemoveKeyInstruction({
                 programId,
@@ -115,16 +122,16 @@ describe('Token Metadata Instructions', () => {
                 key: 'MyTestField',
                 idempotent: true,
             }),
-            splDiscriminate('spl_token_metadata_interface:remove_key_ix'),
+            await splDiscriminate('spl_token_metadata_interface:remove_key_ix'),
             getStructDecoder([
                 ['idempotent', getBooleanDecoder()],
                 ['key', getStringDecoder()],
             ]),
-            { idempotent: true, key: 'MyTestField' }
+            { idempotent: true, key: 'MyTestField' },
         );
     });
 
-    it('Can create Update Authority Instruction', () => {
+    it('Can create Update Authority Instruction', async () => {
         const newAuthority = PublicKey.default;
         checkPackUnpack(
             createUpdateAuthorityInstruction({
@@ -133,13 +140,13 @@ describe('Token Metadata Instructions', () => {
                 oldAuthority: updateAuthority,
                 newAuthority,
             }),
-            splDiscriminate('spl_token_metadata_interface:update_the_authority'),
-            getStructDecoder([['newAuthority', getBytesDecoder({ size: 32 })]]),
-            { newAuthority: Uint8Array.from(newAuthority.toBuffer()) }
+            await splDiscriminate('spl_token_metadata_interface:update_the_authority'),
+            getStructDecoder([['newAuthority', fixDecoderSize(getBytesDecoder(), 32)]]),
+            { newAuthority: Uint8Array.from(newAuthority.toBuffer()) },
         );
     });
 
-    it('Can create Emit Instruction', () => {
+    it('Can create Emit Instruction', async () => {
         const start: Option<bigint> = some(0n);
         const end: Option<bigint> = some(10n);
         checkPackUnpack(
@@ -149,12 +156,12 @@ describe('Token Metadata Instructions', () => {
                 start: 0n,
                 end: 10n,
             }),
-            splDiscriminate('spl_token_metadata_interface:emitter'),
+            await splDiscriminate('spl_token_metadata_interface:emitter'),
             getStructDecoder([
                 ['start', getOptionDecoder(getU64Decoder())],
                 ['end', getOptionDecoder(getU64Decoder())],
             ]),
-            { start, end }
+            { start, end },
         );
     });
 });

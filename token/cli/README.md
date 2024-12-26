@@ -1,6 +1,6 @@
 # SPL Token program command-line utility
 
-A basic command-line for creating and using SPL Tokens.  See https://spl.solana.com/token for more details
+A basic command-line for creating and using SPL Tokens.  See <https://spl.solana.com/token> for more details
 
 ## Build
 
@@ -32,4 +32,11 @@ After that, you can run the tests as any other Rust project:
 
 ```sh
 cargo test
+```
+
+To run it locally you can do it like this:
+
+```sh
+cargo build --manifest-path token/cli/Cargo.toml
+target/debug/spl-token <command>
 ```

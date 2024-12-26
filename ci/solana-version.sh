@@ -14,10 +14,7 @@
 if [[ -n $SOLANA_VERSION ]]; then
   solana_version="$SOLANA_VERSION"
 else
-  # This file is now out of sync with the versions in Cargo.toml.
-  # https://github.com/solana-labs/solana-program-library/pull/6182
-  # This will require some manual cleanup the next time the version is updated.
-  solana_version=v1.18.2
+  solana_version=v2.1.0
 fi
 
 export solana_version="$solana_version"
@@ -26,7 +23,7 @@ export PATH="$HOME"/.local/share/solana/install/active_release/bin:"$PATH"
 if [[ -n $1 ]]; then
   case $1 in
   install)
-    sh -c "$(curl -sSfL https://release.solana.com/$solana_version/install)"
+    sh -c "$(curl -sSfL https://release.anza.xyz/$solana_version/install)"
     solana --version
     ;;
   *)

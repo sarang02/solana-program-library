@@ -1,13 +1,13 @@
 //! Temporary ElGamal keypair argument parser.
 //!
-//! NOTE: this module should be remoeved in the next Solana upgrade.
+//! NOTE: this module should be removed in the next Solana upgrade.
 
 use {
     base64::{prelude::BASE64_STANDARD, Engine},
     clap::ArgMatches,
-    spl_token_2022::solana_zk_token_sdk::{
-        encryption::elgamal::{ElGamalKeypair, ElGamalPubkey},
-        zk_token_elgamal::pod::ElGamalPubkey as PodElGamalPubkey,
+    spl_token_2022::solana_zk_sdk::encryption::{
+        elgamal::{ElGamalKeypair, ElGamalPubkey},
+        pod::elgamal::PodElGamalPubkey,
     },
 };
 
@@ -70,6 +70,6 @@ fn elgamal_pubkey_from_str(s: &str) -> Option<PodElGamalPubkey> {
         return None;
     }
     let pubkey_vec = BASE64_STANDARD.decode(s).ok()?;
-    let elgamal_pubkey = ElGamalPubkey::from_bytes(&pubkey_vec)?;
+    let elgamal_pubkey = ElGamalPubkey::try_from(pubkey_vec.as_ref()).ok()?;
     Some(elgamal_pubkey.into())
 }

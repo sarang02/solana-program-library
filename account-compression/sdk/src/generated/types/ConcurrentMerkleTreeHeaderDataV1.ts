@@ -9,11 +9,12 @@ import * as beet from '@metaplex-foundation/beet';
 import * as beetSolana from '@metaplex-foundation/beet-solana';
 import * as web3 from '@solana/web3.js';
 export type ConcurrentMerkleTreeHeaderDataV1 = {
-    maxBufferSize: number;
-    maxDepth: number;
     authority: web3.PublicKey;
     creationSlot: beet.bignum;
-    padding: number[] /* size: 6 */;
+    isBatchInitialized: boolean;
+    maxBufferSize: number;
+    maxDepth: number;
+    padding: number[] /* size: 5 */;
 };
 
 /**
@@ -26,7 +27,8 @@ export const concurrentMerkleTreeHeaderDataV1Beet = new beet.BeetArgsStruct<Conc
         ['maxDepth', beet.u32],
         ['authority', beetSolana.publicKey],
         ['creationSlot', beet.u64],
-        ['padding', beet.uniformFixedSizeArray(beet.u8, 6)],
+        ['isBatchInitialized', beet.bool],
+        ['padding', beet.uniformFixedSizeArray(beet.u8, 5)],
     ],
     'ConcurrentMerkleTreeHeaderDataV1',
 );

@@ -29,7 +29,7 @@
 
 #[cfg(feature = "serde-traits")]
 use serde::{Deserialize, Serialize};
-use {crate::error::AccountResolutionError, solana_program::program_error::ProgramError};
+use {crate::error::AccountResolutionError, solana_program_error::ProgramError};
 
 /// Enum to describe a required seed for a Program-Derived Address
 #[derive(Clone, Debug, PartialEq)]
@@ -44,7 +44,7 @@ pub enum Seed {
     ///     * 1 - Length of literal
     ///     * N - Literal bytes themselves
     Literal {
-        /// The literal value repesented as a vector of bytes.
+        /// The literal value represented as a vector of bytes.
         ///
         /// For example, if a literal value is a string literal,
         /// such as "my-seed", this value would be

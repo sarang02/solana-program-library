@@ -13,14 +13,14 @@ use {
         },
         id, native_mint,
         processor::Processor,
-        solana_zk_token_sdk::encryption::{auth_encryption::*, elgamal::*},
+        solana_zk_sdk::encryption::{auth_encryption::*, elgamal::*},
     },
     spl_token_client::{
         client::{
             ProgramBanksClient, ProgramBanksClientProcessTransaction, ProgramClient,
             SendTransaction, SimulateTransaction,
         },
-        token::{ExtensionInitializationParams, Token, TokenResult},
+        token::{ComputeUnitLimit, ExtensionInitializationParams, Token, TokenResult},
     },
     std::sync::Arc,
 };
@@ -42,7 +42,19 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn new() -> Self {
-        let program_test = ProgramTest::new("spl_token_2022", id(), processor!(Processor::process));
+        let mut program_test =
+            ProgramTest::new("spl_token_2022", id(), processor!(Processor::process));
+        program_test.prefer_bpf(false);
+        program_test.add_program(
+            "spl_record",
+            spl_record::id(),
+            processor!(spl_record::processor::process_instruction),
+        );
+        program_test.add_program(
+            "spl_elgamal_registry",
+            spl_elgamal_registry::id(),
+            processor!(spl_elgamal_registry::processor::process_instruction),
+        );
         let context = program_test.start_with_context().await;
         let context = Arc::new(Mutex::new(context));
 
@@ -113,7 +125,8 @@ impl TestContext {
             &mint_account.pubkey(),
             Some(decimals),
             Arc::new(keypair_clone(&payer)),
-        );
+        )
+        .with_compute_unit_limit(ComputeUnitLimit::Simulated);
 
         let token_unchecked = Token::new(
             Arc::clone(&client),
@@ -121,7 +134,8 @@ impl TestContext {
             &mint_account.pubkey(),
             None,
             Arc::new(payer),
-        );
+        )
+        .with_compute_unit_limit(ComputeUnitLimit::Simulated);
 
         token
             .create_mint(
@@ -157,7 +171,8 @@ impl TestContext {
             Token::create_native_mint(Arc::clone(&client), &id(), Arc::new(keypair_clone(&payer)))
                 .await?;
         // unchecked native is never needed because decimals is known statically
-        let token_unchecked = Token::new_native(Arc::clone(&client), &id(), Arc::new(payer));
+        let token_unchecked = Token::new_native(Arc::clone(&client), &id(), Arc::new(payer))
+            .with_compute_unit_limit(ComputeUnitLimit::Simulated);
         self.token_context = Some(TokenContext {
             decimals: native_mint::DECIMALS,
             mint_authority: Keypair::new(), /* bogus */
@@ -316,23 +331,23 @@ impl ConfidentialTokenAccountMeta {
             .unwrap();
 
         assert_eq!(
-            extension
-                .pending_balance_lo
-                .decrypt(self.elgamal_keypair.secret())
+            self.elgamal_keypair
+                .secret()
+                .decrypt_u32(&extension.pending_balance_lo.try_into().unwrap())
                 .unwrap(),
             expected.pending_balance_lo,
         );
         assert_eq!(
-            extension
-                .pending_balance_hi
-                .decrypt(self.elgamal_keypair.secret())
+            self.elgamal_keypair
+                .secret()
+                .decrypt_u32(&extension.pending_balance_hi.try_into().unwrap())
                 .unwrap(),
             expected.pending_balance_hi,
         );
         assert_eq!(
-            extension
-                .available_balance
-                .decrypt(self.elgamal_keypair.secret())
+            self.elgamal_keypair
+                .secret()
+                .decrypt_u32(&extension.available_balance.try_into().unwrap())
                 .unwrap(),
             expected.available_balance,
         );
@@ -351,4 +366,11 @@ pub(crate) struct ConfidentialTokenAccountBalances {
     pub(crate) pending_balance_hi: u64,
     pub(crate) available_balance: u64,
     pub(crate) decryptable_available_balance: u64,
+}
+
+#[derive(Clone, Copy)]
+pub enum ConfidentialTransferOption {
+    InstructionData,
+    RecordAccount,
+    ContextStateAccount,
 }

@@ -12,9 +12,8 @@ use {
         signature::Signer,
         transaction::{Transaction, TransactionError},
     },
-    spl_associated_token_account::{
-        get_associated_token_address_with_program_id, instruction::create_associated_token_account,
-    },
+    spl_associated_token_account::instruction::create_associated_token_account,
+    spl_associated_token_account_client::address::get_associated_token_address_with_program_id,
     spl_token_2022::{extension::ExtensionType, state::Account},
 };
 
@@ -28,7 +27,7 @@ async fn test_associated_token_address() {
         &spl_token_2022::id(),
     );
 
-    let (mut banks_client, payer, recent_blockhash) =
+    let (banks_client, payer, recent_blockhash) =
         program_test_2022(token_mint_address, true).start().await;
     let rent = banks_client.get_rent().await.unwrap();
 
@@ -79,7 +78,7 @@ async fn test_create_with_fewer_lamports() {
         &spl_token_2022::id(),
     );
 
-    let (mut banks_client, payer, recent_blockhash) =
+    let (banks_client, payer, recent_blockhash) =
         program_test_2022(token_mint_address, true).start().await;
     let rent = banks_client.get_rent().await.unwrap();
     let expected_token_account_len =
@@ -140,7 +139,7 @@ async fn test_create_with_excess_lamports() {
         &spl_token_2022::id(),
     );
 
-    let (mut banks_client, payer, recent_blockhash) =
+    let (banks_client, payer, recent_blockhash) =
         program_test_2022(token_mint_address, true).start().await;
     let rent = banks_client.get_rent().await.unwrap();
 
@@ -201,7 +200,7 @@ async fn test_create_account_mismatch() {
         &spl_token_2022::id(),
     );
 
-    let (mut banks_client, payer, recent_blockhash) =
+    let (banks_client, payer, recent_blockhash) =
         program_test_2022(token_mint_address, true).start().await;
 
     let mut instruction = create_associated_token_account(
@@ -272,7 +271,7 @@ async fn test_create_associated_token_account_using_legacy_implicit_instruction(
         &spl_token_2022::id(),
     );
 
-    let (mut banks_client, payer, recent_blockhash) =
+    let (banks_client, payer, recent_blockhash) =
         program_test_2022(token_mint_address, true).start().await;
     let rent = banks_client.get_rent().await.unwrap();
     let expected_token_account_len =

@@ -6,13 +6,13 @@ For more information, see the full [Solana account compression SDK documentation
 ## Install
 
 ```shell
-npm install --save @solana/spl-account-compression @solana/web3.js
+npm install --save @solana/spl-account-compression @solana/web3.js@1
 ```
 
 __OR__
 
 ```shell
-yarn add @solana/spl-account-compression @solana/web3.js
+yarn add @solana/spl-account-compression @solana/web3.js@1
 ```
 
 ## Information
@@ -167,7 +167,7 @@ Here are some examples using account compression in the wild:
 
 * Solana Program Library [tests](https://github.com/solana-labs/solana-program-library/tree/master/account-compression/sdk/tests)
 
-* Metaplex Program Library Compressed NFT [tests](https://github.com/metaplex-foundation/metaplex-program-library/tree/master/bubblegum/js/tests)
+* Metaplex Program Library Compressed NFT [tests](https://github.com/metaplex-foundation/mpl-bubblegum/tree/main/clients/js/test)
 
 ## Build from Source
 

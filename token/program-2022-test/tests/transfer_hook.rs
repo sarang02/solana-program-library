@@ -6,13 +6,11 @@ use {
     program_test::{
         ConfidentialTokenAccountBalances, ConfidentialTokenAccountMeta, TestContext, TokenContext,
     },
-    solana_program_test::{processor, tokio, ProgramTest},
+    solana_program_test::{tokio, ProgramTest},
     solana_sdk::{
         account::Account,
-        account_info::{next_account_info, AccountInfo},
-        entrypoint::ProgramResult,
         instruction::{AccountMeta, Instruction, InstructionError},
-        program_error::ProgramError,
+        program_option::COption,
         pubkey::Pubkey,
         signature::Signer,
         signer::keypair::Keypair,
@@ -23,11 +21,11 @@ use {
     spl_token_2022::{
         error::TokenError,
         extension::{
+            transfer_fee::{TransferFee, TransferFeeAmount, TransferFeeConfig},
             transfer_hook::{TransferHook, TransferHookAccount},
             BaseStateWithExtensions,
         },
-        instruction, offchain, onchain,
-        processor::Processor,
+        instruction, offchain,
     },
     spl_token_client::token::{ExtensionInitializationParams, TokenError as TokenClientError},
     spl_transfer_hook_interface::{
@@ -36,99 +34,8 @@ use {
     std::{convert::TryInto, sync::Arc},
 };
 
-/// Test program to fail transfer hook, conforms to transfer-hook-interface
-pub fn process_instruction_fail(
-    _program_id: &Pubkey,
-    _accounts: &[AccountInfo],
-    _input: &[u8],
-) -> ProgramResult {
-    Err(ProgramError::InvalidInstructionData)
-}
-
-/// Test program to check signer / write downgrade for repeated accounts,
-/// conforms to transfer-hook-interface
-pub fn process_instruction_downgrade(
-    _program_id: &Pubkey,
-    accounts: &[AccountInfo],
-    _input: &[u8],
-) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-
-    let source_account_info = next_account_info(account_info_iter)?;
-    let _mint_info = next_account_info(account_info_iter)?;
-    let _destination_account_info = next_account_info(account_info_iter)?;
-    let authority_info = next_account_info(account_info_iter)?;
-    let _extra_account_metas_info = next_account_info(account_info_iter)?;
-
-    let source_account_info_again = next_account_info(account_info_iter)?;
-    let authority_info_again = next_account_info(account_info_iter)?;
-
-    if source_account_info.key != source_account_info_again.key {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    if source_account_info_again.is_writable {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    if authority_info.key != authority_info_again.key {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    if authority_info.is_signer {
-        return Err(ProgramError::InvalidAccountData);
-    }
-    Ok(())
-}
-
-/// Test program to transfer two types of tokens with transfer hooks at once
-pub fn process_instruction_swap(
-    _program_id: &Pubkey,
-    accounts: &[AccountInfo],
-    _input: &[u8],
-) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-
-    let source_a_account_info = next_account_info(account_info_iter)?;
-    let mint_a_info = next_account_info(account_info_iter)?;
-    let destination_a_account_info = next_account_info(account_info_iter)?;
-    let authority_a_info = next_account_info(account_info_iter)?;
-    let token_program_a_info = next_account_info(account_info_iter)?;
-
-    let source_b_account_info = next_account_info(account_info_iter)?;
-    let mint_b_info = next_account_info(account_info_iter)?;
-    let destination_b_account_info = next_account_info(account_info_iter)?;
-    let authority_b_info = next_account_info(account_info_iter)?;
-    let token_program_b_info = next_account_info(account_info_iter)?;
-
-    let remaining_accounts = account_info_iter.as_slice();
-
-    onchain::invoke_transfer_checked(
-        token_program_a_info.key,
-        source_a_account_info.clone(),
-        mint_a_info.clone(),
-        destination_a_account_info.clone(),
-        authority_a_info.clone(),
-        remaining_accounts,
-        1,
-        9,
-        &[],
-    )?;
-
-    onchain::invoke_transfer_checked(
-        token_program_b_info.key,
-        source_b_account_info.clone(),
-        mint_b_info.clone(),
-        destination_b_account_info.clone(),
-        authority_b_info.clone(),
-        remaining_accounts,
-        1,
-        9,
-        &[],
-    )?;
-
-    Ok(())
-}
+const TEST_MAXIMUM_FEE: u64 = 10_000_000;
+const TEST_FEE_BASIS_POINTS: u16 = 100;
 
 async fn setup_accounts(
     token_context: &TokenContext,
@@ -165,17 +72,8 @@ async fn setup_accounts(
 
 fn setup_program_test(program_id: &Pubkey) -> ProgramTest {
     let mut program_test = ProgramTest::default();
-    program_test.prefer_bpf(false);
-    program_test.add_program(
-        "spl_token_2022",
-        spl_token_2022::id(),
-        processor!(Processor::process),
-    );
-    program_test.add_program(
-        "my_transfer_hook",
-        *program_id,
-        processor!(spl_transfer_hook_example::processor::process),
-    );
+    program_test.add_program("spl_token_2022", spl_token_2022::id(), None);
+    program_test.add_program("spl_transfer_hook_example", *program_id, None);
     program_test
 }
 
@@ -252,6 +150,44 @@ async fn setup(mint: Keypair, program_id: &Pubkey, authority: &Pubkey) -> TestCo
     context
 }
 
+async fn setup_with_fee(mint: Keypair, program_id: &Pubkey, authority: &Pubkey) -> TestContext {
+    let mut program_test = setup_program_test(program_id);
+
+    let transfer_fee_config_authority = Keypair::new();
+    let withdraw_withheld_authority = Keypair::new();
+    let transfer_fee_basis_points = TEST_FEE_BASIS_POINTS;
+    let maximum_fee = TEST_MAXIMUM_FEE;
+    add_validation_account(&mut program_test, &mint.pubkey(), program_id);
+
+    let context = program_test.start_with_context().await;
+    let context = Arc::new(tokio::sync::Mutex::new(context));
+
+    let mut context = TestContext {
+        context,
+        token_context: None,
+    };
+    context
+        .init_token_with_mint_keypair_and_freeze_authority(
+            mint,
+            vec![
+                ExtensionInitializationParams::TransferHook {
+                    authority: Some(*authority),
+                    program_id: Some(*program_id),
+                },
+                ExtensionInitializationParams::TransferFeeConfig {
+                    transfer_fee_config_authority: transfer_fee_config_authority.pubkey().into(),
+                    withdraw_withheld_authority: withdraw_withheld_authority.pubkey().into(),
+                    transfer_fee_basis_points,
+                    maximum_fee,
+                },
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+    context
+}
+
 async fn setup_with_confidential_transfers(
     mint: Keypair,
     program_id: &Pubkey,
@@ -309,12 +245,7 @@ async fn success_init() {
 #[tokio::test]
 async fn fail_init_all_none() {
     let mut program_test = ProgramTest::default();
-    program_test.prefer_bpf(false);
-    program_test.add_program(
-        "spl_token_2022",
-        spl_token_2022::id(),
-        processor!(Processor::process),
-    );
+    program_test.add_program("spl_token_2022", spl_token_2022::id(), None);
     let context = program_test.start_with_context().await;
     let context = Arc::new(tokio::sync::Mutex::new(context));
     let mut context = TestContext {
@@ -541,22 +472,106 @@ async fn success_transfer() {
 }
 
 #[tokio::test]
+async fn success_transfer_with_fee() {
+    let authority = Keypair::new();
+    let program_id = Pubkey::new_unique();
+    let mint_keypair = Keypair::new();
+
+    let maximum_fee = TEST_MAXIMUM_FEE;
+    let alice_amount = maximum_fee * 100;
+    let transfer_amount = maximum_fee;
+
+    let token_context = setup_with_fee(mint_keypair, &program_id, &authority.pubkey())
+        .await
+        .token_context
+        .take()
+        .unwrap();
+
+    let (alice_account, bob_account) =
+        setup_accounts(&token_context, Keypair::new(), Keypair::new(), alice_amount).await;
+
+    let transfer_fee = TransferFee {
+        epoch: 0.into(),
+        transfer_fee_basis_points: TEST_FEE_BASIS_POINTS.into(),
+        maximum_fee: TEST_MAXIMUM_FEE.into(),
+    };
+    let transfer_fee_config = TransferFeeConfig {
+        transfer_fee_config_authority: COption::Some(Pubkey::new_unique()).try_into().unwrap(),
+        withdraw_withheld_authority: COption::Some(Pubkey::new_unique()).try_into().unwrap(),
+        withheld_amount: 0.into(),
+        older_transfer_fee: transfer_fee,
+        newer_transfer_fee: transfer_fee,
+    };
+    let fee = transfer_fee_config
+        .calculate_epoch_fee(0, transfer_amount)
+        .unwrap();
+
+    token_context
+        .token
+        .transfer_with_fee(
+            &alice_account,
+            &bob_account,
+            &token_context.alice.pubkey(),
+            transfer_amount,
+            fee,
+            &[&token_context.alice],
+        )
+        .await
+        .unwrap();
+
+    // Get the accounts' state after the transfer
+    let alice_state = token_context
+        .token
+        .get_account_info(&alice_account)
+        .await
+        .unwrap();
+    let bob_state = token_context
+        .token
+        .get_account_info(&bob_account)
+        .await
+        .unwrap();
+
+    // Check that the correct amount was deducted from Alice's account
+    assert_eq!(alice_state.base.amount, alice_amount - transfer_amount);
+
+    // Check the there are no tokens withheld in Alice's account
+    let extension = alice_state.get_extension::<TransferFeeAmount>().unwrap();
+    assert_eq!(extension.withheld_amount, 0.into());
+
+    // Check the fee tokens are withheld in Bobs's account
+    let extension = bob_state.get_extension::<TransferFeeAmount>().unwrap();
+    assert_eq!(extension.withheld_amount, fee.into());
+
+    // Check that the correct amount was added to Bobs's account
+    assert_eq!(bob_state.base.amount, transfer_amount - fee);
+
+    // the example program checks that the transferring flag was set to true,
+    // so make sure that it was correctly unset by the token program
+    assert_eq!(
+        bob_state
+            .get_extension::<TransferHookAccount>()
+            .unwrap()
+            .transferring,
+        false.into()
+    );
+
+    assert_eq!(
+        alice_state
+            .get_extension::<TransferHookAccount>()
+            .unwrap()
+            .transferring,
+        false.into()
+    );
+}
+
+#[tokio::test]
 async fn fail_transfer_hook_program() {
     let authority = Pubkey::new_unique();
     let program_id = Pubkey::new_unique();
     let mint = Keypair::new();
     let mut program_test = ProgramTest::default();
-    program_test.prefer_bpf(false);
-    program_test.add_program(
-        "spl_token_2022",
-        spl_token_2022::id(),
-        processor!(Processor::process),
-    );
-    program_test.add_program(
-        "my_transfer_hook",
-        program_id,
-        processor!(process_instruction_fail),
-    );
+    program_test.add_program("spl_token_2022", spl_token_2022::id(), None);
+    program_test.add_program("spl_transfer_hook_example_fail", program_id, None);
     let validation_address = get_extra_account_metas_address(&mint.pubkey(), &program_id);
     program_test.add_account(
         validation_address,
@@ -615,17 +630,8 @@ async fn success_downgrade_writable_and_signer_accounts() {
     let program_id = Pubkey::new_unique();
     let mint = Keypair::new();
     let mut program_test = ProgramTest::default();
-    program_test.prefer_bpf(false);
-    program_test.add_program(
-        "spl_token_2022",
-        spl_token_2022::id(),
-        processor!(Processor::process),
-    );
-    program_test.add_program(
-        "my_transfer_hook",
-        program_id,
-        processor!(process_instruction_downgrade),
-    );
+    program_test.add_program("spl_token_2022", spl_token_2022::id(), None);
+    program_test.add_program("spl_transfer_hook_example_downgrade", program_id, None);
     let alice = Keypair::new();
     let alice_account = Keypair::new();
     let validation_address = get_extra_account_metas_address(&mint.pubkey(), &program_id);
@@ -701,11 +707,7 @@ async fn success_transfers_using_onchain_helper() {
 
     let swap_program_id = Pubkey::new_unique();
     let mut program_test = setup_program_test(&program_id);
-    program_test.add_program(
-        "my_swap",
-        swap_program_id,
-        processor!(process_instruction_swap),
-    );
+    program_test.add_program("spl_transfer_hook_example_swap", swap_program_id, None);
     add_validation_account(&mut program_test, &mint_a, &program_id);
     add_validation_account(&mut program_test, &mint_b, &program_id);
 
@@ -742,6 +744,150 @@ async fn success_transfers_using_onchain_helper() {
                 authority: Some(authority),
                 program_id: Some(program_id),
             }],
+            None,
+        )
+        .await
+        .unwrap();
+    let token_b_context = context_b.token_context.unwrap();
+    let (source_b_account, destination_b_account) =
+        setup_accounts(&token_b_context, Keypair::new(), Keypair::new(), amount).await;
+    let authority_b = token_b_context.alice;
+    let account_metas = vec![
+        AccountMeta::new(source_a_account, false),
+        AccountMeta::new_readonly(mint_a, false),
+        AccountMeta::new(destination_a_account, false),
+        AccountMeta::new_readonly(authority_a.pubkey(), true),
+        AccountMeta::new_readonly(spl_token_2022::id(), false),
+        AccountMeta::new(source_b_account, false),
+        AccountMeta::new_readonly(mint_b, false),
+        AccountMeta::new(destination_b_account, false),
+        AccountMeta::new_readonly(authority_b.pubkey(), true),
+        AccountMeta::new_readonly(spl_token_2022::id(), false),
+    ];
+
+    let mut instruction = Instruction::new_with_bytes(swap_program_id, &[], account_metas);
+
+    add_extra_account_metas_for_execute(
+        &mut instruction,
+        &program_id,
+        &source_a_account,
+        &mint_a,
+        &destination_a_account,
+        &authority_a.pubkey(),
+        amount,
+        |address| {
+            token_a.get_account(address).map_ok_or_else(
+                |e| match e {
+                    TokenClientError::AccountNotFound => Ok(None),
+                    _ => Err(offchain::AccountFetchError::from(e)),
+                },
+                |acc| Ok(Some(acc.data)),
+            )
+        },
+    )
+    .await
+    .unwrap();
+    add_extra_account_metas_for_execute(
+        &mut instruction,
+        &program_id,
+        &source_b_account,
+        &mint_b,
+        &destination_b_account,
+        &authority_b.pubkey(),
+        amount,
+        |address| {
+            token_a.get_account(address).map_ok_or_else(
+                |e| match e {
+                    TokenClientError::AccountNotFound => Ok(None),
+                    _ => Err(offchain::AccountFetchError::from(e)),
+                },
+                |acc| Ok(Some(acc.data)),
+            )
+        },
+    )
+    .await
+    .unwrap();
+
+    token_a
+        .process_ixs(&[instruction], &[&authority_a, &authority_b])
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn success_transfers_with_fee_using_onchain_helper() {
+    let authority = Pubkey::new_unique();
+    let program_id = Pubkey::new_unique();
+    let mint_a_keypair = Keypair::new();
+    let mint_a = mint_a_keypair.pubkey();
+    let mint_b_keypair = Keypair::new();
+    let mint_b = mint_b_keypair.pubkey();
+    let amount = 10_000_000_000;
+
+    let transfer_fee_config_authority = Keypair::new();
+    let withdraw_withheld_authority = Keypair::new();
+    let transfer_fee_basis_points = TEST_FEE_BASIS_POINTS;
+    let maximum_fee = TEST_MAXIMUM_FEE;
+
+    let swap_program_id = Pubkey::new_unique();
+    let mut program_test = setup_program_test(&program_id);
+    program_test.add_program(
+        "spl_transfer_hook_example_swap_with_fee",
+        swap_program_id,
+        None,
+    );
+    add_validation_account(&mut program_test, &mint_a, &program_id);
+    add_validation_account(&mut program_test, &mint_b, &program_id);
+
+    let context = program_test.start_with_context().await;
+    let context = Arc::new(tokio::sync::Mutex::new(context));
+    let mut context_a = TestContext {
+        context: context.clone(),
+        token_context: None,
+    };
+    context_a
+        .init_token_with_mint_keypair_and_freeze_authority(
+            mint_a_keypair,
+            vec![
+                ExtensionInitializationParams::TransferHook {
+                    authority: Some(authority),
+                    program_id: Some(program_id),
+                },
+                ExtensionInitializationParams::TransferFeeConfig {
+                    transfer_fee_config_authority: transfer_fee_config_authority.pubkey().into(),
+                    withdraw_withheld_authority: withdraw_withheld_authority.pubkey().into(),
+                    transfer_fee_basis_points,
+                    maximum_fee,
+                },
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+    let token_a_context = context_a.token_context.unwrap();
+    let (source_a_account, destination_a_account) =
+        setup_accounts(&token_a_context, Keypair::new(), Keypair::new(), amount).await;
+    let authority_a = token_a_context.alice;
+    let token_a = token_a_context.token;
+    let mut context_b = TestContext {
+        context,
+        token_context: None,
+    };
+    context_b
+        .init_token_with_mint_keypair_and_freeze_authority(
+            mint_b_keypair,
+            vec![
+                ExtensionInitializationParams::TransferHook {
+                    authority: Some(authority),
+                    program_id: Some(program_id),
+                },
+                ExtensionInitializationParams::TransferFeeConfig {
+                    transfer_fee_config_authority: transfer_fee_config_authority.pubkey().into(),
+                    withdraw_withheld_authority: withdraw_withheld_authority.pubkey().into(),
+                    transfer_fee_basis_points,
+                    maximum_fee,
+                },
+            ],
             None,
         )
         .await
@@ -854,6 +1000,8 @@ async fn success_confidential_transfer() {
             &bob_meta.token_account,
             &alice.pubkey(),
             None,
+            None,
+            None,
             amount,
             None,
             &alice_meta.elgamal_keypair,
@@ -912,4 +1060,53 @@ async fn success_confidential_transfer() {
             .transferring,
         false.into()
     );
+}
+
+#[tokio::test]
+async fn success_without_validation_account() {
+    let authority = Pubkey::new_unique();
+    let program_id = Pubkey::new_unique();
+    let mint = Keypair::new();
+    let mut program_test = ProgramTest::default();
+    program_test.add_program("spl_token_2022", spl_token_2022::id(), None);
+    program_test.add_program("spl_transfer_hook_example_success", program_id, None);
+    let context = program_test.start_with_context().await;
+    let context = Arc::new(tokio::sync::Mutex::new(context));
+    let mut context = TestContext {
+        context,
+        token_context: None,
+    };
+    context
+        .init_token_with_mint_keypair_and_freeze_authority(
+            mint,
+            vec![ExtensionInitializationParams::TransferHook {
+                authority: Some(authority),
+                program_id: Some(program_id),
+            }],
+            None,
+        )
+        .await
+        .unwrap();
+    let token_context = context.token_context.take().unwrap();
+
+    let amount = 10;
+    let (alice_account, bob_account) =
+        setup_accounts(&token_context, Keypair::new(), Keypair::new(), amount).await;
+
+    // only add the transfer hook program id, nothing else
+    let token = token_context
+        .token
+        .with_transfer_hook_accounts(vec![AccountMeta::new_readonly(program_id, false)]);
+    token
+        .transfer(
+            &alice_account,
+            &bob_account,
+            &token_context.alice.pubkey(),
+            amount,
+            &[&token_context.alice],
+        )
+        .await
+        .unwrap();
+    let destination = token.get_account_info(&bob_account).await.unwrap();
+    assert_eq!(destination.base.amount, amount);
 }

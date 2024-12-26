@@ -1,4 +1,4 @@
-#![allow(dead_code)] // needed because cargo doesnt understand test usage
+#![allow(dead_code)] // needed because cargo doesn't understand test usage
 
 use {
     solana_program_test::*,
@@ -15,9 +15,9 @@ use {
     },
     solana_vote_program::{
         self, vote_instruction,
-        vote_state::{VoteInit, VoteState, VoteStateVersions},
+        vote_state::{VoteInit, VoteState},
     },
-    spl_associated_token_account as atoken,
+    spl_associated_token_account_client::address as atoken,
     spl_single_pool::{
         find_pool_address, find_pool_mint_address, find_pool_mint_authority_address,
         find_pool_mpl_authority_address, find_pool_stake_address,
@@ -380,7 +380,7 @@ pub async fn create_vote(
         },
         rent_voter,
         vote_instruction::CreateVoteAccountConfig {
-            space: VoteStateVersions::vote_state_size_of(true) as u64,
+            space: VoteState::size_of() as u64,
             ..Default::default()
         },
     ));
@@ -425,13 +425,13 @@ where
         e.try_into().unwrap()
     } else {
         panic!(
-            "couldnt convert {:?} to ProgramError (expected {:?})",
+            "couldn't convert {:?} to ProgramError (expected {:?})",
             got, expected
         );
     };
 
     // this silly thing is because we can guarantee From<T> has a Debug for T
-    // but TryFrom<T> produces Result<T, E> and E may not have Debug. so we cant
+    // but TryFrom<T> produces Result<T, E> and E may not have Debug. so we can't
     // call unwrap also we use TryFrom because we have to go `instruction
     // error-> program error` because StakeError impls the former but not the
     // latter... and that conversion is merely surjective........

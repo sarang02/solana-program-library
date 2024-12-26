@@ -282,7 +282,7 @@ async fn command_deposit(config: &Config, command_config: DepositCli) -> Command
             .into());
         }
 
-        if stake.delegation.deactivation_epoch < std::u64::MAX {
+        if stake.delegation.deactivation_epoch < u64::MAX {
             return Err(format!(
                 "Stake account {} is deactivating or deactivated",
                 stake_account_address
@@ -408,7 +408,7 @@ async fn command_withdraw(config: &Config, command_config: WithdrawCli) -> Comma
     let stake_account = Keypair::new();
     let stake_account_address = stake_account.pubkey();
 
-    // since we cant infer pool from token account, the withdraw invocation is
+    // since we can't infer pool from token account, the withdraw invocation is
     // rather simpler first get the pool address
     let pool_address = pool_address_from_args(
         command_config.pool_address,
@@ -755,7 +755,7 @@ async fn command_create_stake(config: &Config, command_config: CreateStakeCli) -
 // display stake pool(s)
 async fn command_display(config: &Config, command_config: DisplayCli) -> CommandResult {
     if command_config.all {
-        // the filter isnt necessary now but makes the cli forward-compatible
+        // the filter isn't necessary now but makes the cli forward-compatible
         let pools = config
             .rpc_client
             .get_program_accounts_with_config(

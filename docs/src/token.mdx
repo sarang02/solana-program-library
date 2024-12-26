@@ -113,7 +113,7 @@ const web3 = require('@solana/web3.js');
 const connection = new web3.Connection(web3.clusterApiUrl('devnet'), 'confirmed');
 ```
 ### Keypair
-You can either get your keypair using [`Keypair`](https://solana-labs.github.io/solana-web3.js/classes/Keypair.html) from `@solana/web3.js`, or let the user's wallet handle the keypair and use `sendTransaction` from [`wallet-adapter`](https://github.com/solana-labs/wallet-adapter)
+You can either get your keypair using [`Keypair`](https://solana-labs.github.io/solana-web3.js/v1.x/classes/Keypair.html) from `@solana/web3.js`, or let the user's wallet handle the keypair and use `sendTransaction` from [`wallet-adapter`](https://github.com/solana-labs/wallet-adapter)
 
   </TabItem>
 </Tabs>
@@ -1677,6 +1677,11 @@ require the Solana account being initialized also be a signer. The
 instruction that creates the Solana account by including both instructions in
 the same transaction.
 
+Also, multisignatures allow for duplicate accounts in the signer sets, for very
+simple weighting systems. For example, a 2 of 4 multisig can be constructed with
+3 unique pubkeys, and one pubkey specified twice to give that pubkey double
+voting power.
+
 ### Freezing accounts
 
 The Mint may also contain a `freeze_authority` which can be used to issue
@@ -1874,7 +1879,7 @@ Unlocking works by pushing a permissionless crank on the contract that moves the
 - Audit: The audit was conducted by Kudelski, the report can be found [here](https://github.com/Bonfida/token-vesting/blob/master/audit/Bonfida_SecurityAssessment_Vesting_Final050521.pdf)
 
 #### 2) Streamflow Timelock
-Enables creation, withdrawal, cancelation and transfer of token vesting contracts using time-based lock and escrow accounts.
+Enables creation, withdrawal, cancellation and transfer of token vesting contracts using time-based lock and escrow accounts.
 Contracts are by default cancelable by the creator and transferable by the recipient.
 
 Vesting contract creator chooses various options upon creation, such as:

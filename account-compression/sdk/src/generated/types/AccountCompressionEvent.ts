@@ -19,8 +19,8 @@ import { ChangeLogEvent, changeLogEventBeet } from './ChangeLogEvent';
  * @private
  */
 export type AccountCompressionEventRecord = {
-    ChangeLog: { fields: [ChangeLogEvent] };
     ApplicationData: { fields: [ApplicationDataEvent] };
+    ChangeLog: { fields: [ChangeLogEvent] };
 };
 
 /**
@@ -62,4 +62,4 @@ export const accountCompressionEventBeet = beet.dataEnum<AccountCompressionEvent
             'AccountCompressionEventRecord["ApplicationData"]',
         ),
     ],
-]) as beet.FixableBeet<AccountCompressionEvent>;
+]) as beet.FixableBeet<AccountCompressionEvent, AccountCompressionEvent>;

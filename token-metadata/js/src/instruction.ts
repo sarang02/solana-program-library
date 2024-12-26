@@ -1,16 +1,19 @@
 import type { Encoder } from '@solana/codecs';
 import {
+    addEncoderSizePrefix,
+    fixEncoderSize,
     getBooleanEncoder,
     getBytesEncoder,
     getDataEnumCodec,
     getOptionEncoder,
-    getStringEncoder,
+    getUtf8Encoder,
     getStructEncoder,
     getTupleEncoder,
+    getU32Encoder,
     getU64Encoder,
-    mapEncoder,
+    transformEncoder,
 } from '@solana/codecs';
-import { splDiscriminate } from '@solana/spl-type-length-value';
+import type { VariableSizeEncoder } from '@solana/codecs';
 import type { PublicKey } from '@solana/web3.js';
 import { SystemProgram, TransactionInstruction } from '@solana/web3.js';
 
@@ -18,14 +21,18 @@ import type { Field } from './field.js';
 import { getFieldCodec, getFieldConfig } from './field.js';
 
 function getInstructionEncoder<T extends object>(discriminator: Uint8Array, dataEncoder: Encoder<T>): Encoder<T> {
-    return mapEncoder(getTupleEncoder([getBytesEncoder(), dataEncoder]), (data: T): [Uint8Array, T] => [
+    return transformEncoder(getTupleEncoder([getBytesEncoder(), dataEncoder]), (data: T): [Uint8Array, T] => [
         discriminator,
         data,
     ]);
 }
 
 function getPublicKeyEncoder(): Encoder<PublicKey> {
-    return mapEncoder(getBytesEncoder({ size: 32 }), (publicKey: PublicKey) => publicKey.toBytes());
+    return transformEncoder(fixEncoderSize(getBytesEncoder(), 32), (publicKey: PublicKey) => publicKey.toBytes());
+}
+
+function getStringEncoder(): VariableSizeEncoder<string> {
+    return addEncoderSizePrefix(getUtf8Encoder(), getU32Encoder());
 }
 
 /**
@@ -58,13 +65,16 @@ export function createInitializeInstruction(args: InitializeInstructionArgs): Tr
         ],
         data: Buffer.from(
             getInstructionEncoder(
-                splDiscriminate('spl_token_metadata_interface:initialize_account'),
+                new Uint8Array([
+                    /* await splDiscriminate('spl_token_metadata_interface:initialize_account') */
+                    210, 225, 30, 162, 88, 184, 77, 141,
+                ]),
                 getStructEncoder([
                     ['name', getStringEncoder()],
                     ['symbol', getStringEncoder()],
                     ['uri', getStringEncoder()],
-                ])
-            ).encode({ name, symbol, uri })
+                ]),
+            ).encode({ name, symbol, uri }),
         ),
     });
 }
@@ -91,12 +101,15 @@ export function createUpdateFieldInstruction(args: UpdateFieldInstruction): Tran
         ],
         data: Buffer.from(
             getInstructionEncoder(
-                splDiscriminate('spl_token_metadata_interface:updating_field'),
+                new Uint8Array([
+                    /* await splDiscriminate('spl_token_metadata_interface:updating_field') */
+                    221, 233, 49, 45, 181, 202, 220, 200,
+                ]),
                 getStructEncoder([
                     ['field', getDataEnumCodec(getFieldCodec())],
                     ['value', getStringEncoder()],
-                ])
-            ).encode({ field: getFieldConfig(field), value })
+                ]),
+            ).encode({ field: getFieldConfig(field), value }),
         ),
     });
 }
@@ -119,12 +132,15 @@ export function createRemoveKeyInstruction(args: RemoveKeyInstructionArgs) {
         ],
         data: Buffer.from(
             getInstructionEncoder(
-                splDiscriminate('spl_token_metadata_interface:remove_key_ix'),
+                new Uint8Array([
+                    /* await splDiscriminate('spl_token_metadata_interface:remove_key_ix') */
+                    234, 18, 32, 56, 89, 141, 37, 181,
+                ]),
                 getStructEncoder([
                     ['idempotent', getBooleanEncoder()],
                     ['key', getStringEncoder()],
-                ])
-            ).encode({ idempotent, key })
+                ]),
+            ).encode({ idempotent, key }),
         ),
     });
 }
@@ -147,9 +163,12 @@ export function createUpdateAuthorityInstruction(args: UpdateAuthorityInstructio
         ],
         data: Buffer.from(
             getInstructionEncoder(
-                splDiscriminate('spl_token_metadata_interface:update_the_authority'),
-                getStructEncoder([['newAuthority', getPublicKeyEncoder()]])
-            ).encode({ newAuthority: newAuthority ?? SystemProgram.programId })
+                new Uint8Array([
+                    /* await splDiscriminate('spl_token_metadata_interface:update_the_authority') */
+                    215, 228, 166, 228, 84, 100, 86, 123,
+                ]),
+                getStructEncoder([['newAuthority', getPublicKeyEncoder()]]),
+            ).encode({ newAuthority: newAuthority ?? SystemProgram.programId }),
         ),
     });
 }
@@ -168,12 +187,15 @@ export function createEmitInstruction(args: EmitInstructionArgs): TransactionIns
         keys: [{ isSigner: false, isWritable: false, pubkey: metadata }],
         data: Buffer.from(
             getInstructionEncoder(
-                splDiscriminate('spl_token_metadata_interface:emitter'),
+                new Uint8Array([
+                    /* await splDiscriminate('spl_token_metadata_interface:emitter') */
+                    250, 166, 180, 250, 13, 12, 184, 70,
+                ]),
                 getStructEncoder([
                     ['start', getOptionEncoder(getU64Encoder())],
                     ['end', getOptionEncoder(getU64Encoder())],
-                ])
-            ).encode({ start: start ?? null, end: end ?? null })
+                ]),
+            ).encode({ start: start ?? null, end: end ?? null }),
         ),
     });
 }
